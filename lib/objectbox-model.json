@@ -1,0 +1,108 @@
+{
+  "_note1": "KEEP THIS FILE! Check it into a version control system (VCS) like git.",
+  "_note2": "ObjectBox manages crucial IDs for your object model. See docs for details.",
+  "_note3": "If you have VCS merge conflicts, you must resolve them according to ObjectBox docs.",
+  "entities": [
+    {
+      "id": "1:5163123535892336562",
+      "lastPropertyId": "2:595672351960101895",
+      "name": "Tag",
+      "properties": [
+        {
+          "id": "1:5527304652252315859",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:595672351960101895",
+          "name": "name",
+          "indexId": "1:4843656409920837308",
+          "type": 9,
+          "flags": 2080
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "2:3090353901879372909",
+      "lastPropertyId": "3:2162218059161696701",
+      "name": "ImageMeta",
+      "properties": [
+        {
+          "id": "1:1215240304155563311",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:6228964843602763671",
+          "name": "localPath",
+          "type": 9
+        },
+        {
+          "id": "3:2162218059161696701",
+          "name": "postId",
+          "indexId": "2:6092278765806091523",
+          "type": 11,
+          "flags": 520,
+          "relationTarget": "Post"
+        }
+      ],
+      "relations": []
+    },
+    {
+      "id": "3:1551219590584248299",
+      "lastPropertyId": "5:1284081191498630664",
+      "name": "Post",
+      "properties": [
+        {
+          "id": "1:1110564005166846947",
+          "name": "id",
+          "type": 6,
+          "flags": 1
+        },
+        {
+          "id": "2:7881841992744921427",
+          "name": "uuid",
+          "type": 9
+        },
+        {
+          "id": "3:5903341050497116593",
+          "name": "content",
+          "type": 9
+        },
+        {
+          "id": "4:8188533964532363312",
+          "name": "updatedAt",
+          "type": 10
+        },
+        {
+          "id": "5:1284081191498630664",
+          "name": "isDeleted",
+          "indexId": "3:7031885950109081293",
+          "type": 1,
+          "flags": 8
+        }
+      ],
+      "relations": [
+        {
+          "id": "1:357296839644546150",
+          "name": "tags",
+          "targetId": "1:5163123535892336562"
+        }
+      ]
+    }
+  ],
+  "lastEntityId": "3:1551219590584248299",
+  "lastIndexId": "3:7031885950109081293",
+  "lastRelationId": "1:357296839644546150",
+  "lastSequenceId": "0:0",
+  "modelVersion": 5,
+  "modelVersionParserMinimum": 5,
+  "retiredEntityUids": [],
+  "retiredIndexUids": [],
+  "retiredPropertyUids": [],
+  "retiredRelationUids": [],
+  "version": 1
+}
