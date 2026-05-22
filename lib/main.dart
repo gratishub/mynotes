@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'services/objectbox_store.dart';
-import 'ui/publish_screen.dart';
+import 'ui/home_screen.dart';
 
 void main() async {
   // 确保 Flutter 框架初始化完成（使用原生插件前必须调用）
@@ -30,8 +30,7 @@ class MyApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
       ),
-      // 直接以发布页作为首页（后续阶段会添加路由导航）
-      home: const PublishScreen(),
+      home: const HomeScreen(),
     );
   }
 }
