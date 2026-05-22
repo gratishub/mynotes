@@ -1,4 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 相册读取权限 -->
+    <!-- Android 13+ (API 33) 使用细粒度媒体权限 -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+    <!-- Android 12 及以下使用传统存储读取权限，maxSdkVersion 限制其适用范围 -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+
     <application
         android:label="mynotes"
         android:name="${applicationName}"
