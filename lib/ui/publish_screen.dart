@@ -416,69 +416,111 @@ class _PublishScreenState extends ConsumerState<PublishScreen> {
 
   Widget _buildPreviewBody(ThemeData theme) {
     final content = _contentController.text.trim();
+    final hasContent = content.isNotEmpty;
+    final totalImages = _totalImageCount;
 
-    if (content.isEmpty) {
+    if (!hasContent && totalImages == 0) {
       return const SizedBox.shrink();
     }
 
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(20, 8, 20, 40),
-      child: MarkdownBody(
-        data: content,
-        selectable: true,
-        styleSheet: MarkdownStyleSheet(
-          p: theme.textTheme.bodyLarge?.copyWith(
-            height: 1.7,
-            color: const Color(0xFF3A3A3A),
-          ),
-          a: TextStyle(color: theme.colorScheme.primary),
-          strong: theme.textTheme.bodyLarge?.copyWith(
-            fontWeight: FontWeight.w700,
-            color: const Color(0xFF3A3A3A),
-          ),
-          em: theme.textTheme.bodyLarge?.copyWith(
-            fontStyle: FontStyle.italic,
-            color: const Color(0xFF3A3A3A),
-          ),
-          h1: theme.textTheme.headlineSmall?.copyWith(
-            fontWeight: FontWeight.w700,
-            color: const Color(0xFF2A2A2A),
-          ),
-          h2: theme.textTheme.titleLarge?.copyWith(
-            fontWeight: FontWeight.w600,
-            color: const Color(0xFF2A2A2A),
-          ),
-          h3: theme.textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.w600,
-            color: const Color(0xFF2A2A2A),
-          ),
-          blockquote: theme.textTheme.bodyLarge?.copyWith(
-            color: const Color(0xFF888888),
-            fontStyle: FontStyle.italic,
-          ),
-          code: TextStyle(
-            backgroundColor: Colors.grey.shade100,
-            fontFamily: 'monospace',
-            fontSize: 14,
-            color: const Color(0xFF3A3A3A),
-          ),
-          codeblockDecoration: BoxDecoration(
-            color: Colors.grey.shade100,
-            borderRadius: BorderRadius.circular(8),
-          ),
-          listBullet: const TextStyle(color: Color(0xFF3A3A3A)),
-          horizontalRuleDecoration: BoxDecoration(
-            border: Border(top: BorderSide(color: Colors.grey.shade300)),
-          ),
-          blockquoteDecoration: BoxDecoration(
-            border: Border(
-              left: BorderSide(
-                color: theme.colorScheme.primary.withAlpha(100),
-                width: 3,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (hasContent)
+            MarkdownBody(
+              data: content,
+              selectable: true,
+              styleSheet: MarkdownStyleSheet(
+                p: theme.textTheme.bodyLarge?.copyWith(
+                  height: 1.7,
+                  color: const Color(0xFF3A3A3A),
+                ),
+                a: TextStyle(color: theme.colorScheme.primary),
+                strong: theme.textTheme.bodyLarge?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: const Color(0xFF3A3A3A),
+                ),
+                em: theme.textTheme.bodyLarge?.copyWith(
+                  fontStyle: FontStyle.italic,
+                  color: const Color(0xFF3A3A3A),
+                ),
+                h1: theme.textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: const Color(0xFF2A2A2A),
+                ),
+                h2: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: const Color(0xFF2A2A2A),
+                ),
+                h3: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: const Color(0xFF2A2A2A),
+                ),
+                blockquote: theme.textTheme.bodyLarge?.copyWith(
+                  color: const Color(0xFF888888),
+                  fontStyle: FontStyle.italic,
+                ),
+                code: TextStyle(
+                  backgroundColor: Colors.grey.shade100,
+                  fontFamily: 'monospace',
+                  fontSize: 14,
+                  color: const Color(0xFF3A3A3A),
+                ),
+                codeblockDecoration: BoxDecoration(
+                  color: Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                listBullet: const TextStyle(color: Color(0xFF3A3A3A)),
+                horizontalRuleDecoration: BoxDecoration(
+                  border: Border(top: BorderSide(color: Colors.grey.shade300)),
+                ),
+                blockquoteDecoration: BoxDecoration(
+                  border: Border(
+                    left: BorderSide(
+                      color: theme.colorScheme.primary.withAlpha(100),
+                      width: 3,
+                    ),
+                  ),
+                ),
               ),
             ),
-          ),
-        ),
+          if (totalImages > 0) ...[
+            if (hasContent) const SizedBox(height: 16),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: _allImagePaths.map((path) {
+                return GestureDetector(
+                  onTap: () => _openFullScreenImage(path),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.file(
+                      File(path),
+                      width: (MediaQuery.of(context).size.width - 48) / 2,
+                      height: 160,
+                      fit: BoxFit.cover,
+                      cacheWidth: 400,
+                      errorBuilder: (context, error, stackTrace) {
+                        return Container(
+                          width: (MediaQuery.of(context).size.width - 48) / 2,
+                          height: 160,
+                          color: Colors.grey.shade200,
+                          child: const Icon(
+                            Icons.broken_image,
+                            size: 28,
+                            color: Colors.grey,
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ],
+        ],
       ),
     );
   }
@@ -551,6 +593,48 @@ class _PublishScreenState extends ConsumerState<PublishScreen> {
   int get _totalImageCount =>
       _existingImagePaths.length + _selectedImages.length;
 
+  /// 合并后的所有图片路径
+  List<String> get _allImagePaths =>
+      [..._existingImagePaths, ..._selectedImages.map((x) => x.path)];
+
+  /// 打开全屏图片查看器（支持捏合缩放）
+  void _openFullScreenImage(String path) {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => Scaffold(
+          backgroundColor: Colors.black,
+          appBar: AppBar(
+            backgroundColor: Colors.black,
+            foregroundColor: Colors.white,
+            elevation: 0,
+            leading: IconButton(
+              icon: const Icon(Icons.close_rounded),
+              onPressed: () => Navigator.of(context).pop(),
+            ),
+          ),
+          body: Center(
+            child: InteractiveViewer(
+              maxScale: 5,
+              child: Image.file(
+                File(path),
+                fit: BoxFit.contain,
+                errorBuilder: (context, error, stackTrace) {
+                  return const Center(
+                    child: Icon(
+                      Icons.broken_image,
+                      size: 48,
+                      color: Colors.white54,
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildImagePreviewRow() {
     return SizedBox(
       height: 76,
@@ -573,14 +657,16 @@ class _PublishScreenState extends ConsumerState<PublishScreen> {
       padding: const EdgeInsets.only(right: 8),
       child: Stack(
         children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: Image.file(
-              File(imagePath),
-              width: 68,
-              height: 68,
-              fit: BoxFit.cover,
-              cacheWidth: 200,
+          GestureDetector(
+            onTap: () => _openFullScreenImage(imagePath),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.file(
+                File(imagePath),
+                width: 68,
+                height: 68,
+                fit: BoxFit.cover,
+                cacheWidth: 200,
               errorBuilder: (context, error, stackTrace) {
                 return Container(
                   width: 68,
@@ -592,6 +678,7 @@ class _PublishScreenState extends ConsumerState<PublishScreen> {
               },
             ),
           ),
+        ),
           Positioned(
             top: 2,
             right: 2,
