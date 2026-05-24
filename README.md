@@ -53,6 +53,74 @@ flutter analyze
 flutter run
 ```
 
+## 构建 APK
+
+### Debug 构建
+
+```bash
+flutter build apk --debug
+```
+
+构建产物位置：`build/app/outputs/flutter-apk/app-debug.apk`
+
+### Release 构建
+
+```bash
+flutter build apk --release
+```
+
+构建产物位置：`build/app/outputs/flutter-apk/app-release.apk`
+
+> Release 构建需要配置签名密钥，详见 `internal/KEYS.md`（如存在）。
+
+## 在安卓设备上调试
+
+### 前置条件
+
+1. 手机开启 **开发者选项** 和 **USB 调试**
+   - 设置 → 关于手机 → 连续点击"版本号"7 次
+   - 设置 → 系统 → 开发者选项 → 打开 USB 调试
+2. USB 数据线连接手机到电脑
+3. 手机上允许 USB 调试授权
+
+### 运行调试
+
+```bash
+# 检查设备是否识别
+flutter devices
+
+# 启动调试（自动 build + 安装 + 启动）
+flutter run
+```
+
+### 调试常用命令
+
+| 按键 | 功能 |
+|------|------|
+| `r` | 热重载（刷新 UI，保留状态） |
+| `R` | 热重启（重启应用） |
+| `q` | 退出调试 |
+| `h` | 查看所有快捷键 |
+
+## 网络镜像配置（中国大陆）
+
+由于网络限制，在中国大陆构建时推荐配置国内镜像：
+
+| 镜像 | 用途 |
+|------|------|
+| `pub.flutter-io.cn` | Dart 包镜像 |
+| `storage.flutter-io.cn` | Flutter 引擎 / 构件镜像 |
+| `mirrors.cloud.tencent.com/gradle` | Gradle 发行版镜像 |
+| `maven.aliyun.com/repository/public` | Maven 依赖镜像 |
+| `maven.aliyun.com/repository/google` | Google Maven 镜像 |
+| `maven.aliyun.com/repository/gradle-plugin` | Gradle 插件镜像 |
+
+配置方式参考 `internal/SETUP.md`（如存在）。
+
+## FAQ
+
+构建和调试过程中遇到的常见问题见 [FAQ.md](./FAQ.md)。
+
 ## 开发约定
 
 - 软删除：帖子删除使用 `isDeleted` 标记，支持回收站功能

@@ -24,11 +24,39 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    const warmOrange = Color(0xFFFF9472);
+
     return MaterialApp(
       title: 'mynotes',
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: warmOrange,
+          brightness: Brightness.light,
+        ),
         useMaterial3: true,
+        scaffoldBackgroundColor: const Color(0xFFF8F7F4),
+
+        appBarTheme: const AppBarTheme(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          scrolledUnderElevation: 0,
+          centerTitle: true,
+          titleTextStyle: TextStyle(
+            color: Color(0xFF3A3A3A),
+            fontSize: 18,
+            fontWeight: FontWeight.w500,
+          ),
+          iconTheme: IconThemeData(color: Color(0xFF3A3A3A)),
+        ),
+
+        cardTheme: CardThemeData(
+          color: Colors.white,
+          elevation: 0,
+          shadowColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+        ),
       ),
       home: const HomeScreen(),
     );
