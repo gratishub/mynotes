@@ -30,6 +30,7 @@ class _PublishScreenState extends ConsumerState<PublishScreen> {
   final _focusNode = FocusNode();
   final List<XFile> _selectedImages = [];
   final List<String> _existingImagePaths = [];
+  final List<String> _deletedImagePaths = [];
   bool _isPublishing = false;
   bool _showFormatBar = false;
   bool _isPreview = false;
@@ -78,7 +79,17 @@ class _PublishScreenState extends ConsumerState<PublishScreen> {
   }
 
   void _removeImage(int index) {
-    setState(() => _selectedImages.removeAt(index));
+    setState(() {
+      final existingCount = _existingImagePaths.length;
+      if (index < existingCount) {
+        // 删除已有图片（标记为待删除）
+        _deletedImagePaths.add(_existingImagePaths[index]);
+        _existingImagePaths.removeAt(index);
+      } else {
+        // 删除新选图片
+        _selectedImages.removeAt(index - existingCount);
+      }
+    });
   }
 
   // ============================================================
@@ -173,7 +184,7 @@ class _PublishScreenState extends ConsumerState<PublishScreen> {
       if (_isEditing) {
         post = widget.post!;
         post.content = content;
-        post.updatedAt = DateTime.now();
+        // 编辑不改变 updatedAt，保留原始日期
       } else {
         post = Post(
           uuid: const Uuid().v4(),
@@ -198,10 +209,23 @@ class _PublishScreenState extends ConsumerState<PublishScreen> {
         store.imageBox.put(imageMeta);
       }
 
+      // 清理编辑模式下被删除的已有图片
+      for (final path in _deletedImagePaths) {
+        final file = File(path);
+        if (file.existsSync()) file.deleteSync();
+        for (final img in savedPost.images) {
+          if (img.localPath == path) {
+            store.imageBox.remove(img.id);
+            break;
+          }
+        }
+      }
+
       _contentController.clear();
       setState(() {
         _selectedImages.clear();
         _existingImagePaths.clear();
+        _deletedImagePaths.clear();
         _isPublishing = false;
       });
 
@@ -252,7 +276,7 @@ class _PublishScreenState extends ConsumerState<PublishScreen> {
             // ——— 底部工具栏（仅编辑模式可见） ———
             if (!_isPreview) ...[
               if (_showFormatBar) _buildFormatToolbar(theme),
-              if (_selectedImages.isNotEmpty) _buildImagePreviewRow(),
+              if (_totalImageCount > 0) _buildImagePreviewRow(),
               _buildCapsuleToolbar(theme),
             ],
           ],
@@ -523,19 +547,28 @@ class _PublishScreenState extends ConsumerState<PublishScreen> {
   // 图片预览行
   // ============================================================
 
+  /// 总图片数（已有 + 新选）
+  int get _totalImageCount =>
+      _existingImagePaths.length + _selectedImages.length;
+
   Widget _buildImagePreviewRow() {
     return SizedBox(
       height: 76,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16),
-        itemCount: _selectedImages.length,
+        itemCount: _totalImageCount,
         itemBuilder: (context, index) => _buildImagePreview(index),
       ),
     );
   }
 
   Widget _buildImagePreview(int index) {
+    final existingCount = _existingImagePaths.length;
+    final imagePath = index < existingCount
+        ? _existingImagePaths[index]
+        : _selectedImages[index - existingCount].path;
+
     return Padding(
       padding: const EdgeInsets.only(right: 8),
       child: Stack(
@@ -543,7 +576,7 @@ class _PublishScreenState extends ConsumerState<PublishScreen> {
           ClipRRect(
             borderRadius: BorderRadius.circular(12),
             child: Image.file(
-              File(_selectedImages[index].path),
+              File(imagePath),
               width: 68,
               height: 68,
               fit: BoxFit.cover,
