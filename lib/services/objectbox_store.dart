@@ -226,6 +226,65 @@ class ObjectBoxStore {
     return results;
   }
 
+  // ============================================================
+  // 日历查询（按日期检索）
+  // ============================================================
+
+  /// 获取指定日期的所有非删除帖子，按更新时间降序
+  ///
+  /// [date] 要查询的日期（忽略时间部分，只使用年月日）
+  ///
+  /// 实现说明：
+  /// - 将输入日期转换为当天 00:00:00 到次日 00:00:00 时间范围
+  /// - 使用 greaterOrEqual + lessThan 实现 between 语义
+  /// - 正确处理时区：DateTime 不携带时区信息，依赖系统本地时间
+  List<Post> getPostsByDate(DateTime date) {
+    final startOfDay = DateTime(date.year, date.month, date.day);
+    final endOfDay = startOfDay.add(const Duration(days: 1));
+    final startMs = startOfDay.millisecondsSinceEpoch;
+    final endMs = endOfDay.millisecondsSinceEpoch;
+
+    final query = postBox
+        .query(
+            Post_.isDeleted.notEquals(true)
+                .and(Post_.updatedAt.greaterOrEqual(startMs))
+                .and(Post_.updatedAt.lessThan(endMs)))
+        .order(Post_.updatedAt, flags: Order.descending)
+        .build();
+
+    final results = query.find();
+    query.close();
+    return results;
+  }
+
+  /// 获取指定月份内有日记的所有日期（用于日历记忆足迹标记）
+  ///
+  /// [year] 年份，如 2025
+  /// [month] 月份，1-12
+  ///
+  /// 返回值：该月内有帖子的日期列表（day of month，如 [3, 7, 15]）
+  List<int> getDaysWithPostsInMonth(int year, int month) {
+    final startOfMonth = DateTime(year, month, 1);
+    final startOfNextMonth = DateTime(year, month + 1, 1);
+    final startMs = startOfMonth.millisecondsSinceEpoch;
+    final endMs = startOfNextMonth.millisecondsSinceEpoch;
+
+    final query = postBox
+        .query(
+            Post_.isDeleted.notEquals(true)
+                .and(Post_.updatedAt.greaterOrEqual(startMs))
+                .and(Post_.updatedAt.lessThan(endMs)))
+        .build();
+
+    final posts = query.find();
+    query.close();
+
+    // 提取不重复的日期（按天去重）
+    final daySet = posts.map((p) => p.updatedAt.day).toSet();
+    final days = daySet.toList()..sort();
+    return days;
+  }
+
   /// 软删除帖子（将 isDeleted 设为 true）
   ///
   /// 为什么不直接物理删除？

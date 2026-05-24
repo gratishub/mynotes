@@ -34,7 +34,23 @@ class MyApp extends StatelessWidget {
           brightness: Brightness.light,
         ),
         useMaterial3: true,
+        fontFamily: 'DiaryFont',
         scaffoldBackgroundColor: const Color(0xFFF8F7F4),
+
+        textTheme: const TextTheme(
+          bodyLarge: TextStyle(
+            fontSize: 16,
+            height: 1.8,
+            letterSpacing: 0.5,
+            color: Color(0xFF3A3A3A),
+          ),
+          bodyMedium: TextStyle(
+            fontSize: 14,
+            height: 1.7,
+            letterSpacing: 0.4,
+            color: Color(0xFF3A3A3A),
+          ),
+        ),
 
         appBarTheme: const AppBarTheme(
           backgroundColor: Colors.transparent,

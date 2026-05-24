@@ -27,12 +27,24 @@ class HomeScreen extends ConsumerStatefulWidget {
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   bool _isFeedView = true;
+  bool _isCalendarExpanded = false;
+  DateTime? _selectedDate;
+  late DateTime _calendarMonth;
+  Set<int> _datesWithPosts = {};
   static const _weekDays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+
+  @override
+  void initState() {
+    super.initState();
+    _calendarMonth = DateTime(DateTime.now().year, DateTime.now().month, 1);
+  }
 
   @override
   Widget build(BuildContext context) {
     final store = ref.watch(objectBoxProvider);
-    final posts = store.getActivePosts();
+    final posts = _selectedDate != null
+        ? store.getPostsByDate(_selectedDate!)
+        : store.getActivePosts();
 
     return Scaffold(
       body: Stack(
@@ -41,6 +53,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             child: Column(
               children: [
                 _buildHeader(),
+                AnimatedCrossFade(
+                  firstChild: const SizedBox.shrink(),
+                  secondChild: _buildCalendarPanel(),
+                  crossFadeState: _isCalendarExpanded
+                      ? CrossFadeState.showSecond
+                      : CrossFadeState.showFirst,
+                  duration: const Duration(milliseconds: 300),
+                  sizeCurve: Curves.easeInOut,
+                ),
                 Expanded(
                   child: AnimatedSwitcher(
                     duration: const Duration(milliseconds: 300),
@@ -75,26 +96,57 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   Widget _buildHeader() {
     final now = DateTime.now();
-    final weekDay = _weekDays[now.weekday - 1];
-    final dateStr = '${now.month}月${now.day}日 $weekDay';
+    String dateStr;
+    if (_selectedDate != null) {
+      final weekDay = _weekDays[_selectedDate!.weekday - 1];
+      dateStr = '${_selectedDate!.month}月${_selectedDate!.day}日 $weekDay';
+    } else {
+      final weekDay = _weekDays[now.weekday - 1];
+      dateStr = '${now.month}月${now.day}日 $weekDay';
+    }
 
     return Padding(
       padding: const EdgeInsets.only(left: 20, right: 8, top: 8, bottom: 4),
       child: Row(
         children: [
-          Text(
-            dateStr,
-            style: const TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.w600,
-              color: Color(0xFF3A3A3A),
+          GestureDetector(
+            onTap: _toggleCalendar,
+            child: Text(
+              dateStr,
+              style: const TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF3A3A3A),
+              ),
             ),
           ),
           const Spacer(),
+          if (_selectedDate != null)
+            Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: GestureDetector(
+                onTap: _onClearFilter,
+                child: Text(
+                  '清除筛选',
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Theme.of(context).colorScheme.primary,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ),
           IconButton(
-            icon: const Icon(Icons.wb_sunny_outlined, size: 20),
-            color: const Color(0xFF3A3A3A),
-            onPressed: () {},
+            icon: Icon(
+              _isCalendarExpanded
+                  ? Icons.keyboard_arrow_up_rounded
+                  : Icons.calendar_month_outlined,
+              size: 20,
+            ),
+            color: _isCalendarExpanded
+                ? Theme.of(context).colorScheme.primary
+                : const Color(0xFF3A3A3A),
+            onPressed: _toggleCalendar,
           ),
           IconButton(
             icon: Icon(
@@ -124,7 +176,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   Widget _buildFeedView(List<Post> posts, {Key? key}) {
     if (posts.isEmpty) {
-      return _buildEmptyState(key: key);
+      return _buildEmptyState(
+        key: key,
+        message: _selectedDate != null ? '这一天处于记忆的空白，去写一篇吧～' : '还没有日记',
+      );
     }
 
     return ListView.builder(
@@ -380,7 +435,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
 
     if (allImages.isEmpty) {
-      return _buildEmptyState(key: key, message: '暂无图片');
+      return _buildEmptyState(
+        key: key,
+        message: _selectedDate != null ? '这一天还没有图片记忆' : '暂无图片',
+      );
     }
 
     return MasonryGridView.count(
@@ -460,6 +518,253 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  // ============================================================
+  // 日历时光隧道 — 可折叠年月面板
+  // ============================================================
+
+  /// 展开/收起日历
+  void _toggleCalendar() {
+    setState(() {
+      _isCalendarExpanded = !_isCalendarExpanded;
+    });
+    if (_isCalendarExpanded) {
+      _fetchDatesWithPosts();
+    }
+  }
+
+  /// 查询当前显示月份中有日记的日期
+  void _fetchDatesWithPosts() {
+    final store = ref.read(objectBoxProvider);
+    final days = store.getDaysWithPostsInMonth(
+      _calendarMonth.year,
+      _calendarMonth.month,
+    );
+    setState(() {
+      _datesWithPosts = days.toSet();
+    });
+  }
+
+  /// 上一个月
+  void _onPreviousMonth() {
+    setState(() {
+      _calendarMonth =
+          DateTime(_calendarMonth.year, _calendarMonth.month - 1, 1);
+    });
+    _fetchDatesWithPosts();
+  }
+
+  /// 下一个月
+  void _onNextMonth() {
+    setState(() {
+      _calendarMonth =
+          DateTime(_calendarMonth.year, _calendarMonth.month + 1, 1);
+    });
+    _fetchDatesWithPosts();
+  }
+
+  /// 点击某一天
+  void _onDayTap(int day) {
+    final date = DateTime(_calendarMonth.year, _calendarMonth.month, day);
+    setState(() {
+      if (_selectedDate != null &&
+          _selectedDate!.year == date.year &&
+          _selectedDate!.month == date.month &&
+          _selectedDate!.day == date.day) {
+        _selectedDate = null; // 再次点击同一天取消筛选
+      } else {
+        _selectedDate = date;
+      }
+    });
+  }
+
+  /// 清除日期筛选
+  void _onClearFilter() {
+    setState(() {
+      _selectedDate = null;
+    });
+  }
+
+  /// 当前显示月份中的某天是否为今天
+  bool _isToday(int day) {
+    final now = DateTime.now();
+    return now.year == _calendarMonth.year &&
+        now.month == _calendarMonth.month &&
+        now.day == day;
+  }
+
+  /// 日历面板
+  Widget _buildCalendarPanel() {
+    final theme = Theme.of(context);
+    final daysInMonth =
+        DateTime(_calendarMonth.year, _calendarMonth.month + 1, 0).day;
+    final firstWeekday =
+        DateTime(_calendarMonth.year, _calendarMonth.month, 1).weekday -
+            1; // Mon = 0
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF5F0EB),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // ——— 月份导航 ———
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 4, 4, 0),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.chevron_left, size: 22),
+                  color: const Color(0xFF3A3A3A),
+                  onPressed: _onPreviousMonth,
+                ),
+                Text(
+                  '${_calendarMonth.year}年${_calendarMonth.month}月',
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF3A3A3A),
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.chevron_right, size: 22),
+                  color: const Color(0xFF3A3A3A),
+                  onPressed: _onNextMonth,
+                ),
+              ],
+            ),
+          ),
+          // ——— 星期行 ———
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+            child: Row(
+              children: ['一', '二', '三', '四', '五', '六', '日']
+                  .map(
+                    (day) => Expanded(
+                      child: Center(
+                        child: Text(
+                          day,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: theme.colorScheme.onSurface.withAlpha(100),
+                          ),
+                        ),
+                      ),
+                    ),
+                  )
+                  .toList(),
+            ),
+          ),
+          // ——— 日期网格 ———
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+            child: GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 7,
+                childAspectRatio: 1.1,
+              ),
+              itemCount: 42,
+              itemBuilder: (context, index) {
+                final day = index - firstWeekday + 1;
+                if (day < 1 || day > daysInMonth) {
+                  return const SizedBox.shrink();
+                }
+
+                final isToday = _isToday(day);
+                final isSelected = _selectedDate != null &&
+                    _selectedDate!.year == _calendarMonth.year &&
+                    _selectedDate!.month == _calendarMonth.month &&
+                    _selectedDate!.day == day;
+                final hasPost = _datesWithPosts.contains(day);
+
+                return _buildDayCell(day, isToday, isSelected, hasPost);
+              },
+            ),
+          ),
+          // ——— 底部：回到今天 ———
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: TextButton(
+              onPressed: () {
+                setState(() {
+                  _calendarMonth =
+                      DateTime(DateTime.now().year, DateTime.now().month, 1);
+                  _selectedDate = null;
+                });
+                _fetchDatesWithPosts();
+              },
+              style: TextButton.styleFrom(
+                foregroundColor: theme.colorScheme.primary,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              child: const Text('回到今天', style: TextStyle(fontSize: 13)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 单个日期格
+  Widget _buildDayCell(int day, bool isToday, bool isSelected, bool hasPost) {
+    final theme = Theme.of(context);
+
+    return GestureDetector(
+      onTap: () => _onDayTap(day),
+      child: Container(
+        margin: const EdgeInsets.all(2),
+        decoration: isSelected
+            ? BoxDecoration(
+                color: theme.colorScheme.primary,
+                shape: BoxShape.circle,
+              )
+            : null,
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '$day',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: isToday ? FontWeight.w700 : FontWeight.w400,
+                  color: isSelected
+                      ? Colors.white
+                      : isToday
+                          ? theme.colorScheme.primary
+                          : const Color(0xFF3A3A3A),
+                ),
+              ),
+              if (hasPost)
+                Container(
+                  width: 4,
+                  height: 4,
+                  margin: const EdgeInsets.only(top: 1),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? Colors.white.withAlpha(180)
+                        : theme.colorScheme.primary.withAlpha(120),
+                    shape: BoxShape.circle,
+                  ),
+                )
+              else
+                const SizedBox(height: 5),
+            ],
+          ),
         ),
       ),
     );
