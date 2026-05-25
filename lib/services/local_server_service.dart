@@ -192,15 +192,86 @@ class LocalServerService {
 
   /// 获取当前手机的局域网 IP 地址
   ///
-  /// 使用 [NetworkInfo.getWifiIP] 获取。
-  /// 返回 null 表示无法获取（如未连接 WiFi）。
+  /// 优先使用 [NetworkInfo.getWifiIP]，如果返回的是虚拟网卡 IP（如 Docker 的 172.x.x.x），
+  /// 则退而枚举所有网络接口，寻找真实的 WiFi IP。
   Future<String?> getIpAddress() async {
-    final networkInfo = NetworkInfo();
+    // 方法1：使用 network_info_plus
     try {
-      return await networkInfo.getWifiIP();
-    } catch (_) {
-      return null;
+      final networkInfo = NetworkInfo();
+      final wifiIp = await networkInfo.getWifiIP();
+      if (wifiIp != null && wifiIp.isNotEmpty && !_isVirtualIp(wifiIp)) {
+        return wifiIp;
+      }
+    } catch (_) {}
+
+    // 方法2：枚举所有网络接口，寻找真实 IP
+    try {
+      final interfaces = await NetworkInterface.list();
+      // 优先返回 192.168.x.x 或 10.x.x.x（典型的 WiFi 网段）
+      for (final iface in interfaces) {
+        for (final addr in iface.addresses) {
+          if (addr.type == InternetAddressType.IPv4 &&
+              _isLikelyWifiIp(addr.address)) {
+            return addr.address;
+          }
+        }
+      }
+      // 兜底：返回第一个非 loopback 的 IPv4 地址
+      for (final iface in interfaces) {
+        for (final addr in iface.addresses) {
+          if (addr.type == InternetAddressType.IPv4 && !addr.isLoopback) {
+            return addr.address;
+          }
+        }
+      }
+    } catch (_) {}
+
+    return null;
+  }
+
+  /// Docker 等虚拟网卡常用 172.16.0.0/12 网段
+  bool _isVirtualIp(String ip) {
+    if (ip.startsWith('172.')) {
+      final parts = ip.split('.');
+      if (parts.length == 4) {
+        final second = int.tryParse(parts[1]) ?? 0;
+        if (second >= 16 && second <= 31) return true;
+      }
     }
+    return false;
+  }
+
+  /// 判断是否属于典型家庭/办公 WiFi 网段
+  bool _isLikelyWifiIp(String ip) {
+    return ip.startsWith('192.168.') || ip.startsWith('10.');
+  }
+
+  /// 获取所有局域网 IP 地址（用于 UI 展示多个地址）
+  Future<List<String>> getAllLocalIps() async {
+    final ips = <String>{};
+
+    // 从 network_info_plus 获取
+    try {
+      final networkInfo = NetworkInfo();
+      final wifiIp = await networkInfo.getWifiIP();
+      if (wifiIp != null && wifiIp.isNotEmpty && !_isVirtualIp(wifiIp)) {
+        ips.add(wifiIp);
+      }
+    } catch (_) {}
+
+    // 枚举所有接口
+    try {
+      final interfaces = await NetworkInterface.list();
+      for (final iface in interfaces) {
+        for (final addr in iface.addresses) {
+          if (addr.type == InternetAddressType.IPv4 && !addr.isLoopback) {
+            ips.add(addr.address);
+          }
+        }
+      }
+    } catch (_) {}
+
+    return ips.toList();
   }
 
   /// 释放资源
