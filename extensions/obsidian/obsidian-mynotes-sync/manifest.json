@@ -1,0 +1,10 @@
+{
+  "id": "mynotes-sync",
+  "name": "Mynotes Sync",
+  "version": "0.1.0",
+  "minAppVersion": "0.15.0",
+  "description": "局域网同步工具，用于 Mynotes 私有数据的多设备同步",
+  "author": "gratishub",
+  "authorUrl": "",
+  "isDesktopOnly": false
+}

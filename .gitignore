@@ -44,5 +44,8 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
+# Claude Code local config
+.claude/
+
 # Internal personal documentation (not shared)
 /internal/
