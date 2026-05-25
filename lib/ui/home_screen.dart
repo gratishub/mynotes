@@ -10,6 +10,7 @@ import '../models/post.dart';
 import '../models/image_meta.dart';
 import '../providers.dart';
 import 'publish_screen.dart';
+import 'lan_sync_screen.dart';
 
 /// 主界面 - 展示已发布的日记
 ///
@@ -147,6 +148,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 ? Theme.of(context).colorScheme.primary
                 : const Color(0xFF3A3A3A),
             onPressed: _toggleCalendar,
+          ),
+          IconButton(
+            icon: const Icon(Icons.lan_outlined, size: 20),
+            color: const Color(0xFF3A3A3A),
+            tooltip: '局域网同步',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const LanSyncScreen()),
+              );
+            },
           ),
           IconButton(
             icon: Icon(

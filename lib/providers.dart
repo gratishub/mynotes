@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'services/objectbox_store.dart';
+import 'services/local_server_service.dart';
 
 /// ObjectBox 数据库实例提供者
 ///
@@ -13,3 +14,72 @@ import 'services/objectbox_store.dart';
 final objectBoxProvider = Provider<ObjectBoxStore>((ref) {
   return ObjectBoxStore.instance;
 });
+
+/// 局域网服务状态
+class LanServerState {
+  final bool isRunning;
+  final String? ipAddress;
+  final int? port;
+
+  const LanServerState({
+    this.isRunning = false,
+    this.ipAddress,
+    this.port,
+  });
+
+  LanServerState copyWith({
+    bool? isRunning,
+    String? ipAddress,
+    int? port,
+  }) {
+    return LanServerState(
+      isRunning: isRunning ?? this.isRunning,
+      ipAddress: ipAddress ?? this.ipAddress,
+      port: port ?? this.port,
+    );
+  }
+
+  String get url => ipAddress != null && port != null
+      ? 'http://$ipAddress:$port'
+      : '';
+}
+
+/// 局域网服务状态管理器
+///
+/// 使用 Riverpod 3.x 的 [Notifier] 模式管理 [LocalServerService] 生命周期。
+class LanServerNotifier extends Notifier<LanServerState> {
+  late final LocalServerService _service;
+
+  @override
+  LanServerState build() {
+    _service = LocalServerService();
+    ref.onDispose(() => _service.dispose());
+    return const LanServerState();
+  }
+
+  /// 启动服务
+  Future<void> start() async {
+    final port = await _service.start();
+    final ip = await _service.getIpAddress();
+    state = LanServerState(isRunning: true, ipAddress: ip, port: port);
+  }
+
+  /// 停止服务
+  Future<void> stop() async {
+    await _service.stop();
+    state = const LanServerState();
+  }
+
+  /// 刷新 IP（如 WiFi 切换后）
+  Future<void> refreshIp() async {
+    final ip = await _service.getIpAddress();
+    if (state.isRunning) {
+      state = state.copyWith(ipAddress: ip);
+    }
+  }
+}
+
+final lanServerProvider =
+    NotifierProvider<LanServerNotifier, LanServerState>(
+  LanServerNotifier.new,
+);

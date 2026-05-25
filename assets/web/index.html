@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>我的日记</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&display=swap');
+    body { font-family: 'Noto Sans SC', sans-serif; }
+    .post-card { transition: transform 0.2s ease, box-shadow 0.2s ease; }
+    .post-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.1); }
+  </style>
+</head>
+<body class="bg-[#F8F7F4] min-h-screen">
+  <!-- 顶栏 -->
+  <header class="sticky top-0 z-10 bg-white/70 backdrop-blur-md border-b border-gray-100">
+    <div class="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
+      <h1 class="text-lg font-medium text-[#3A3A3A] tracking-wide">📖 我的日记</h1>
+      <button id="refreshBtn" class="text-sm text-gray-400 hover:text-[#FF9472] transition-colors cursor-pointer">
+        ↻ 刷新
+      </button>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-4 py-6">
+    <!-- 加载中 -->
+    <div id="loading" class="flex justify-center py-20">
+      <div class="w-6 h-6 border-2 border-[#FF9472] border-t-transparent rounded-full animate-spin"></div>
+      <span class="ml-3 text-gray-400 text-sm">加载日记中...</span>
+    </div>
+
+    <!-- 错误提示 -->
+    <div id="error" class="hidden text-center py-20">
+      <p class="text-gray-400 text-sm">加载失败，请确认手机和电脑在同一局域网</p>
+      <button onclick="fetchPosts()" class="mt-3 text-sm text-[#FF9472] hover:underline cursor-pointer">重试</button>
+    </div>
+
+    <!-- 空状态 -->
+    <div id="empty" class="hidden text-center py-20">
+      <p class="text-gray-300 text-lg">还没有写过日记</p>
+      <p class="text-gray-300 text-sm mt-1">在手机上写一篇吧～</p>
+    </div>
+
+    <!-- 日记网格 -->
+    <div id="grid" class="hidden grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+  </main>
+
+  <!-- 全文查看弹窗 -->
+  <div id="modalOverlay" class="hidden fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4" onclick="closeModal()">
+    <div class="bg-white rounded-2xl max-w-lg w-full max-h-[80vh] flex flex-col shadow-xl" onclick="event.stopPropagation()">
+      <div class="flex items-center justify-between px-5 py-3 border-b border-gray-100">
+        <span class="text-sm text-gray-400">日记全文</span>
+        <button onclick="closeModal()" class="text-gray-300 hover:text-gray-500 text-xl leading-none cursor-pointer">&times;</button>
+      </div>
+      <div id="modalBody" class="p-5 text-sm text-[#3A3A3A] leading-relaxed whitespace-pre-wrap overflow-y-auto"></div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = '';
+
+    async function fetchPosts() {
+      const loadingEl = document.getElementById('loading');
+      const errorEl = document.getElementById('error');
+      const emptyEl = document.getElementById('empty');
+      const gridEl = document.getElementById('grid');
+
+      loadingEl.classList.remove('hidden');
+      errorEl.classList.add('hidden');
+      emptyEl.classList.add('hidden');
+      gridEl.classList.add('hidden');
+
+      try {
+        const res = await fetch(`${API_BASE}/api/posts`);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const posts = await res.json();
+
+        loadingEl.classList.add('hidden');
+
+        if (!posts || posts.length === 0) {
+          emptyEl.classList.remove('hidden');
+          return;
+        }
+
+        gridEl.classList.remove('hidden');
+        gridEl.innerHTML = posts.map(post => renderCard(post)).join('');
+      } catch (e) {
+        loadingEl.classList.add('hidden');
+        errorEl.classList.remove('hidden');
+        console.error('Fetch error:', e);
+      }
+    }
+
+    function formatDate(ms) {
+      const d = new Date(ms);
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      const w = ['日', '一', '二', '三', '四', '五', '六'][d.getDay()];
+      return `${y}年${m}月${day}日 星期${w}`;
+    }
+
+    // 全文查看弹窗
+    let modalContent = '';
+
+    function openModal(content) {
+      modalContent = content || '';
+      document.getElementById('modalBody').textContent = modalContent;
+      document.getElementById('modalOverlay').classList.remove('hidden');
+      document.body.style.overflow = 'hidden';
+    }
+
+    function closeModal() {
+      document.getElementById('modalOverlay').classList.add('hidden');
+      document.body.style.overflow = '';
+    }
+
+    function renderCard(post) {
+      const preview = post.content
+        ? post.content.length > 200
+          ? post.content.substring(0, 200) + '...'
+          : post.content
+        : '';
+
+      const hasImages = post.images && post.images.length > 0;
+
+      return `
+        <div class="post-card bg-white rounded-2xl overflow-hidden border border-gray-100 cursor-pointer"
+             onclick="openModal(\`${escapeHtml(post.content || '')}\`)">
+          ${hasImages ? `
+          <div class="flex gap-0.5 overflow-hidden ${post.images.length === 1 ? 'h-48' : 'h-40'}">
+            ${post.images.slice(0, 3).map((img, i) => `
+              <img src="${img.url}" alt="image"
+                   class="${post.images.length === 1 ? 'w-full' : (post.images.length === 2 ? 'w-1/2' : (i === 0 ? 'w-1/2' : 'w-1/4'))} h-full object-cover"
+                   onerror="this.style.display='none'" />
+            `).join('')}
+            ${post.images.length > 3 ? `<div class="w-1/4 h-full bg-gray-100 flex items-center justify-center text-gray-400 text-xs">+${post.images.length - 3}</div>` : ''}
+          </div>` : ''}
+          <div class="p-4">
+            <p class="text-xs text-gray-400 mb-2">${formatDate(post.updatedAt)}</p>
+            <p class="text-sm text-[#3A3A3A] leading-relaxed whitespace-pre-wrap line-clamp-4">${escapeHtml(preview)}</p>
+          </div>
+        </div>
+      `;
+    }
+
+    function escapeHtml(str) {
+      const div = document.createElement('div');
+      div.textContent = str;
+      return div.innerHTML;
+    }
+
+    // 手动刷新
+    document.getElementById('refreshBtn').addEventListener('click', fetchPosts);
+
+    // 自动加载
+    fetchPosts();
+
+    // 每 30 秒自动刷新
+    setInterval(fetchPosts, 30000);
+  </script>
+</body>
+</html>
