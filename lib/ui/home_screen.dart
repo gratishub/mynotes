@@ -10,6 +10,7 @@ import '../models/post.dart';
 import '../models/image_meta.dart';
 import '../providers.dart';
 import '../services/export_service.dart';
+import 'export_filter_sheet.dart';
 import 'publish_screen.dart';
 import 'lan_sync_screen.dart';
 import 'package:share_plus/share_plus.dart';
@@ -207,6 +208,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   /// 导出日记为 ZIP 并唤起系统分享
   Future<void> _exportDiary() async {
+    // ——— 弹出筛选面板，等待用户确认 ———
+    final filteredPosts = await showModalBottomSheet<List<Post>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => const ExportFilterSheet(),
+    );
+
+    // 用户取消或没有符合条件的日记
+    if (filteredPosts == null || filteredPosts.isEmpty) return;
+
     // ——— Loading 弹窗 ———
     if (!mounted) return;
     showDialog(
@@ -241,7 +256,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
 
     try {
-      final zipPath = await ExportService.exportToZip();
+      final zipPath =
+          await ExportService.exportToZip(filteredPosts);
 
       if (!mounted) return;
       // 关闭 Loading 弹窗

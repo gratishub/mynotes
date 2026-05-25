@@ -178,6 +178,52 @@ class ObjectBoxStore {
     return results;
   }
 
+  /// 带筛选条件的查询方法
+  ///
+  /// 支持时间范围 + 标签筛选，按时间升序返回。
+  /// 标签筛选使用内存过滤（适用于日记应用的数据量级）。如果传入空的 selectedTags 列表，等同于不过滤标签。
+  List<Post> getFilteredPosts({
+    DateTime? startDate,
+    DateTime? endDate,
+    List<String>? selectedTags,
+  }) {
+    // 基础条件：过滤软删除
+    var condition = Post_.isDeleted.notEquals(true);
+
+    // 时间范围（端点均以当天 00:00 为界，endDate 包含当天）
+    if (startDate != null) {
+      final startMs =
+          DateTime(startDate.year, startDate.month, startDate.day)
+              .millisecondsSinceEpoch;
+      condition = condition.and(Post_.updatedAt.greaterOrEqual(startMs));
+    }
+    if (endDate != null) {
+      // endDate 取 inclusive：小于次日 00:00 即可覆盖全天
+      final endMs =
+          DateTime(endDate.year, endDate.month, endDate.day + 1)
+              .millisecondsSinceEpoch;
+      condition = condition.and(Post_.updatedAt.lessThan(endMs));
+    }
+
+    final query = postBox
+        .query(condition)
+        .order(Post_.updatedAt) // 升序
+        .build();
+
+    var results = query.find();
+    query.close();
+
+    // 标签内存过滤
+    if (selectedTags != null && selectedTags.isNotEmpty) {
+      final tagSet = selectedTags.toSet();
+      results = results
+          .where((post) => post.tags.any((tag) => tagSet.contains(tag.name)))
+          .toList();
+    }
+
+    return results;
+  }
+
   /// 获取回收站中的帖子（软删除的帖子）
   List<Post> getDeletedPosts() {
     final query = postBox

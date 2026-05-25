@@ -143,18 +143,24 @@ class ExportService {
 
   /// 执行完整的 ZIP 导出流程
   ///
+  /// [postsToExport] 待导出的日记列表（已由调用方筛好）。
+  ///
   /// 1. 在临时目录下创建沙盒环境（mynotes_export/assets）
-  /// 2. 写入 Markdown 文件
-  /// 3. 物理拷贝图片到 assets/
+  /// 2. 按天聚合传入列表 → 写入 Markdown 文件
+  /// 3. 遍历所有日记的图片，物理拷贝到 assets/
   /// 4. 用 archive 库压缩为 ZIP
   /// 5. 清理临时文件夹
   ///
   /// 返回值：生成的 ZIP 文件绝对路径
   ///
   /// 异常情况：
-  /// - 没有任何日记时抛出 [StateError]
+  /// - 空列表时抛出 [StateError]
   /// - 图片文件在本地丢失时，Markdown 中替换为注释占位
-  static Future<String> exportToZip() async {
+  static Future<String> exportToZip(List<Post> postsToExport) async {
+    if (postsToExport.isEmpty) {
+      throw StateError('没有可导出的日记');
+    }
+
     // ——— 1. 建立沙盒环境 ———
     final tempDir = await getTemporaryDirectory();
     final exportDir = Directory('${tempDir.path}/mynotes_export');
@@ -163,21 +169,20 @@ class ExportService {
     await assetsDir.create(recursive: true);
 
     try {
-      // ——— 2. 生成并写入 Markdown ———
-      final content = generateExportContent();
-      if (content.isEmpty) {
-        throw StateError('没有可导出的日记');
-      }
-
-      for (final entry in content.entries) {
-        await File('${exportDir.path}/${entry.key}').writeAsString(entry.value);
+      // ——— 2. 按天聚合 → 写入 Markdown ———
+      final grouped = groupByDay(postsToExport);
+      final content = <String, String>{};
+      for (final entry in grouped.entries) {
+        final md = buildDailyMarkdown(entry.key, entry.value);
+        final fileName = '${entry.key}.md';
+        content[fileName] = md;
+        await File('${exportDir.path}/$fileName').writeAsString(md);
       }
 
       // ——— 3. 物理拷贝图片 ———
-      final posts = getAllPostsAscending();
       final missingImages = <String>{};
 
-      for (final post in posts) {
+      for (final post in postsToExport) {
         for (final image in post.images) {
           final sourceFile = File(image.localPath);
           final fileName = image.localPath.split(RegExp(r'[/\\]')).last;
@@ -192,8 +197,8 @@ class ExportService {
 
       // 对缺失图片：在已生成的 Markdown 中将引用替换为注释占位
       if (missingImages.isNotEmpty) {
-        for (final entry in content.entries) {
-          final mdFile = File('${exportDir.path}/${entry.key}');
+        for (final fileName in content.keys) {
+          final mdFile = File('${exportDir.path}/$fileName');
           var mdContent = await mdFile.readAsString();
           for (final img in missingImages) {
             mdContent = mdContent.replaceAll(
