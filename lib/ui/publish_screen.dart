@@ -32,7 +32,6 @@ class _PublishScreenState extends ConsumerState<PublishScreen> {
   final List<String> _existingImagePaths = [];
   final List<String> _deletedImagePaths = [];
   bool _isPublishing = false;
-  bool _showFormatBar = false;
   bool _isPreview = false;
 
   static const _weekDays = [
@@ -96,8 +95,22 @@ class _PublishScreenState extends ConsumerState<PublishScreen> {
   // Markdown 快捷格式插入
   // ============================================================
 
-  /// 在选中文字两侧包裹标记，未选中则在光标处插入占位
-  void _wrapSelection(String delimiter, {String placeholder = ''}) {
+  /// 通用 Markdown 格式注入
+  ///
+  /// [prefix] 标记前缀，如 `**`、`*`
+  /// [suffix] 标记后缀。不传时使用行首插入模式（标题/列表/引用）；
+  ///          传值时使用包裹模式（加粗/斜体），选中文本时包裹，未选中时插入占位。
+  void _insertMarkdown(String prefix, {String suffix = ''}) {
+    if (suffix.isNotEmpty) {
+      _wrapSelection(prefix, suffix: suffix);
+    } else {
+      _insertLinePrefix(prefix);
+    }
+    _focusNode.requestFocus();
+  }
+
+  /// 在选中文字两侧包裹标记
+  void _wrapSelection(String prefix, {String suffix = ''}) {
     final text = _contentController.text;
     final sel = _contentController.selection;
 
@@ -106,60 +119,53 @@ class _PublishScreenState extends ConsumerState<PublishScreen> {
       _contentController.text = text.replaceRange(
         sel.start,
         sel.end,
-        '$delimiter$selected$delimiter',
+        '$prefix$selected$suffix',
       );
       _contentController.selection = TextSelection.collapsed(
-        offset: sel.start + delimiter.length + selected.length + delimiter.length,
+        offset: sel.start + prefix.length + selected.length + suffix.length,
       );
     } else {
-      final content = '$delimiter$placeholder$delimiter';
+      final content = '$prefix$suffix';
       _contentController.text = text.replaceRange(sel.start, sel.start, content);
       _contentController.selection = TextSelection.collapsed(
-        offset: sel.start + delimiter.length,
+        offset: sel.start + prefix.length,
       );
     }
-    _refocus();
   }
 
-  /// 在行首插入前缀（标题、引用、列表）
+  /// 在行首插入前缀（标题、引用、列表、待办）
   void _insertLinePrefix(String prefix) {
     final text = _contentController.text;
     final cursorPos = _contentController.selection.start;
 
-    // 找到当前行的行首
     int lineStart = cursorPos;
     while (lineStart > 0 && text[lineStart - 1] != '\n') {
       lineStart--;
     }
 
     _contentController.text = text.replaceRange(lineStart, lineStart, prefix);
-
-    // 光标位置向后推移 prefix 的长度
     _contentController.selection = TextSelection.collapsed(
       offset: cursorPos + prefix.length,
     );
-    _refocus();
   }
 
   /// 插入加粗 ** **
-  void _insertBold() => _wrapSelection('**');
+  void _insertBold() => _insertMarkdown('**', suffix: '**');
 
   /// 插入斜体 * *
-  void _insertItalic() => _wrapSelection('*');
+  void _insertItalic() => _insertMarkdown('*', suffix: '*');
 
   /// 插入标题 #
-  void _insertHeading() => _insertLinePrefix('# ');
+  void _insertHeading() => _insertMarkdown('# ');
 
-  /// 插入引用 >
-  void _insertQuote() => _insertLinePrefix('> ');
+  /// 引用
+  void _insertQuote() => _insertMarkdown('> ');
 
-  /// 插入无序列表 -
-  void _insertList() => _insertLinePrefix('- ');
+  /// 无序列表
+  void _insertList() => _insertMarkdown('- ');
 
-  /// 格式操作后重新聚焦输入框
-  void _refocus() {
-    _focusNode.requestFocus();
-  }
+  /// 待办清单
+  void _insertTodo() => _insertMarkdown('- [ ] ');
 
   // ============================================================
   // 发布
@@ -275,8 +281,8 @@ class _PublishScreenState extends ConsumerState<PublishScreen> {
             ),
             // ——— 底部工具栏（仅编辑模式可见） ———
             if (!_isPreview) ...[
-              if (_showFormatBar) _buildFormatToolbar(theme),
               if (_totalImageCount > 0) _buildImagePreviewRow(),
+              _buildMarkdownToolbar(theme),
               _buildCapsuleToolbar(theme),
             ],
           ],
@@ -398,7 +404,7 @@ class _PublishScreenState extends ConsumerState<PublishScreen> {
           border: InputBorder.none,
           enabledBorder: InputBorder.none,
           focusedBorder: InputBorder.none,
-          contentPadding: EdgeInsets.zero,
+          contentPadding: const EdgeInsets.symmetric(vertical: 12),
           isDense: true,
         ),
         style: theme.textTheme.bodyLarge?.copyWith(
@@ -529,58 +535,86 @@ class _PublishScreenState extends ConsumerState<PublishScreen> {
   // Markdown 快捷格式栏
   // ============================================================
 
-  Widget _buildFormatToolbar(ThemeData theme) {
-    return Container(
-      height: 44,
-      margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.grey.shade50,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: [
-          _formatButton('B', FontWeight.w700, _insertBold),
-          _formatButton('I', FontWeight.w400, _insertItalic,
-              fontStyle: FontStyle.italic),
-          _formatButton('H1', FontWeight.w600, _insertHeading, size: 13),
-          _formatButton('"', FontWeight.w400, _insertQuote, size: 16),
-          _formatButton('-', FontWeight.w400, _insertList, size: 18),
-        ],
+  Widget _buildMarkdownToolbar(ThemeData theme) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+          child: Container(
+            height: 42,
+            decoration: BoxDecoration(
+              color: Colors.white.withAlpha(210),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: Colors.white.withAlpha(140)),
+            ),
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              children: [
+                _mdToolButton(
+                  Icons.format_bold_rounded,
+                  '加粗',
+                  _insertBold,
+                ),
+                _mdToolButton(
+                  Icons.format_italic_rounded,
+                  '斜体',
+                  _insertItalic,
+                ),
+                _mdToolDivider(),
+                _mdToolButton(
+                  Icons.format_size_rounded,
+                  '标题',
+                  _insertHeading,
+                ),
+                _mdToolDivider(),
+                _mdToolButton(
+                  Icons.checklist_rounded,
+                  '待办',
+                  _insertTodo,
+                ),
+                _mdToolButton(
+                  Icons.format_list_bulleted_rounded,
+                  '列表',
+                  _insertList,
+                ),
+                _mdToolButton(
+                  Icons.format_quote_rounded,
+                  '引用',
+                  _insertQuote,
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
 
-  Widget _formatButton(
-    String label,
-    FontWeight weight,
-    VoidCallback onTap, {
-    FontStyle fontStyle = FontStyle.normal,
-    double size = 14,
-  }) {
-    return SizedBox(
-      width: 48,
-      height: 36,
-      child: TextButton(
-        onPressed: onTap,
-        style: TextButton.styleFrom(
+  Widget _mdToolButton(IconData icon, String tooltip, VoidCallback onTap) {
+    return Tooltip(
+      message: tooltip,
+      child: SizedBox(
+        width: 40,
+        height: 42,
+        child: IconButton(
           padding: EdgeInsets.zero,
-          minimumSize: Size.zero,
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          foregroundColor: const Color(0xFF555555),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-          ),
+          icon: Icon(icon, size: 20),
+          color: const Color(0xFF555555),
+          onPressed: onTap,
         ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontWeight: weight,
-            fontStyle: fontStyle,
-            fontSize: size,
-            color: const Color(0xFF555555),
-          ),
-        ),
+      ),
+    );
+  }
+
+  Widget _mdToolDivider() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Container(
+        width: 1,
+        color: Colors.black.withAlpha(12),
       ),
     );
   }
@@ -737,14 +771,6 @@ class _PublishScreenState extends ConsumerState<PublishScreen> {
             ),
             child: Row(
               children: [
-                // A 文字格式（切换格式栏显隐）
-                _pillIcon(
-                  Icons.text_fields,
-                  '文字格式',
-                  () => setState(() => _showFormatBar = !_showFormatBar),
-                  isActive: _showFormatBar,
-                ),
-                const Spacer(),
                 // 🖼️ 图片
                 _pillIcon(Icons.image_outlined, '添加图片', _pickImages),
                 const Spacer(),
