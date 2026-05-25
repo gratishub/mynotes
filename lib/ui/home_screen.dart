@@ -9,8 +9,10 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import '../models/post.dart';
 import '../models/image_meta.dart';
 import '../providers.dart';
+import '../services/export_service.dart';
 import 'publish_screen.dart';
 import 'lan_sync_screen.dart';
+import 'package:share_plus/share_plus.dart';
 
 /// 主界面 - 展示已发布的日记
 ///
@@ -177,6 +179,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             },
           ),
           IconButton(
+            icon: const Icon(Icons.archive_outlined, size: 20),
+            color: const Color(0xFF3A3A3A),
+            tooltip: '导出日记',
+            onPressed: _exportDiary,
+          ),
+          IconButton(
             icon: Icon(
               _isFeedView ? Icons.grid_view_rounded : Icons.view_list_rounded,
             ),
@@ -195,6 +203,79 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => PublishScreen(post: post)),
     );
+  }
+
+  /// 导出日记为 ZIP 并唤起系统分享
+  Future<void> _exportDiary() async {
+    // ——— Loading 弹窗 ———
+    if (!mounted) return;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(
+        child: Card(
+          elevation: 4,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.all(Radius.circular(20)),
+          ),
+          child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: 36, vertical: 28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 16),
+                Text(
+                  '正在导出…',
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500,
+                    color: Color(0xFF3A3A3A),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    try {
+      final zipPath = await ExportService.exportToZip();
+
+      if (!mounted) return;
+      // 关闭 Loading 弹窗
+      Navigator.of(context).pop();
+
+      // 唤起系统分享面板
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(zipPath)],
+          text: '我的相册日记备份',
+        ),
+      );
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('导出成功'),
+          duration: Duration(seconds: 2),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      // 关闭 Loading 弹窗
+      Navigator.of(context).pop();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('导出失败：$e'),
+          duration: const Duration(seconds: 3),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
   }
 
   // ============================================================

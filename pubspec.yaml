@@ -48,6 +48,9 @@ dependencies:
   network_info_plus: ^8.1.0
   flutter_background_service: ^5.1.0
   flutter_local_notifications: ^21.0.0
+  archive: ^4.0.9
+  share_plus: ^13.1.0
+  intl: ^0.20.2
 
 dev_dependencies:
   flutter_test:
