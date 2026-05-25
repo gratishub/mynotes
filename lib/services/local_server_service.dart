@@ -54,6 +54,7 @@ class LocalServerService {
   HttpServer? _server;
   late final Router _router;
   int? _port;
+  String? _cachedHtml; // 缓存 Web 页面
 
   /// 服务器是否正在运行
   bool get isRunning => _server != null;
@@ -76,15 +77,16 @@ class LocalServerService {
 
     // 提供 Web 前端页面
     _router.get('/', (Request request) async {
-      try {
-        final html = await rootBundle.loadString('assets/web/index.html');
-        return Response.ok(
-          html,
-          headers: {'Content-Type': 'text/html; charset=utf-8'},
+      final html = await _loadHtml();
+      if (html == null) {
+        return Response.internalServerError(
+          body: 'Failed to load index.html (asset not found or not bundled)',
         );
-      } catch (e) {
-        return Response.internalServerError(body: 'Failed to load index.html');
       }
+      return Response.ok(
+        html,
+        headers: {'Content-Type': 'text/html; charset=utf-8'},
+      );
     });
 
     // 获取所有非删除状态的日记列表
@@ -145,6 +147,20 @@ class LocalServerService {
     });
   }
 
+  /// 加载内置 Web 页面，优先使用缓存
+  Future<String?> _loadHtml() async {
+    if (_cachedHtml != null) return _cachedHtml;
+
+    try {
+      _cachedHtml = await rootBundle.loadString('assets/web/index.html');
+      return _cachedHtml;
+    } catch (e) {
+      // ignore: avoid_print
+      print('[LocalServer] 加载 index.html 失败: $e');
+      return null;
+    }
+  }
+
   /// 启动 Web 服务器
   ///
   /// 绑定到 [InternetAddress.anyIPv4] 端口 [port]（默认 8080）。
@@ -153,6 +169,12 @@ class LocalServerService {
   Future<int> start({int port = 8080}) async {
     if (_server != null) {
       return _port!;
+    }
+
+    // 预加载 HTML，确保 asset 可用
+    final html = await _loadHtml();
+    if (html == null) {
+      throw StateError('无法加载内置 Web 页面，请确认 assets/web/index.html 已正确打包');
     }
 
     // 尝试绑定端口，如果被占用则递增
@@ -169,6 +191,8 @@ class LocalServerService {
           port + attempt,
         );
         _port = port + attempt;
+        // ignore: avoid_print
+        print('[LocalServer] 已启动: ${_server?.address.host}:$_port');
         break;
       } on SocketException catch (_) {
         // 端口被占用，继续尝试下一个
