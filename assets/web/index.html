@@ -10,6 +10,40 @@
     body { font-family: 'Noto Sans SC', sans-serif; }
     .post-card { transition: transform 0.2s ease, box-shadow 0.2s ease; }
     .post-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.1); }
+
+    /* 发布框 textarea */
+    .publisher-textarea {
+      resize: vertical;
+      min-height: 96px;
+      outline: none;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+    .publisher-textarea:focus {
+      border-color: #FF9472;
+      box-shadow: 0 0 0 3px rgba(255, 148, 114, 0.15);
+    }
+
+    /* Toast 提示 */
+    .toast {
+      position: fixed;
+      bottom: 32px;
+      left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      padding: 10px 24px;
+      background: #3A3A3A;
+      color: #fff;
+      border-radius: 24px;
+      font-size: 14px;
+      opacity: 0;
+      transition: opacity 0.3s ease, transform 0.3s ease;
+      pointer-events: none;
+      z-index: 100;
+      white-space: nowrap;
+    }
+    .toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
   </style>
 </head>
 <body class="bg-[#F8F7F4] min-h-screen">
@@ -24,6 +58,19 @@
   </header>
 
   <main class="max-w-6xl mx-auto px-4 py-6">
+    <!-- 发布模块 -->
+    <div class="bg-white rounded-2xl border border-gray-100 p-5 mb-6 shadow-sm">
+      <label for="publisherInput" class="text-sm font-medium text-[#3A3A3A] mb-3 block">
+        写一篇新日记
+      </label>
+      <textarea id="publisherInput" class="publisher-textarea w-full text-sm text-[#3A3A3A] leading-relaxed border border-gray-200 rounded-xl px-4 py-3 bg-[#FAFAF8] placeholder:text-gray-300" placeholder="此刻的想法或发生的故事...（支持 Markdown）"></textarea>
+      <div class="flex justify-end mt-3">
+        <button id="publishBtn" class="bg-[#FF9472] hover:bg-[#FF8058] active:scale-95 text-white text-sm font-medium px-6 py-2 rounded-xl transition-all duration-200 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+          发布到手机
+        </button>
+      </div>
+    </div>
+
     <!-- 加载中 -->
     <div id="loading" class="flex justify-center py-20">
       <div class="w-6 h-6 border-2 border-[#FF9472] border-t-transparent rounded-full animate-spin"></div>
@@ -46,6 +93,9 @@
     <div id="grid" class="hidden grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
   </main>
 
+  <!-- Toast -->
+  <div id="toast" class="toast"></div>
+
   <!-- 全文查看弹窗 -->
   <div id="modalOverlay" class="hidden fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4" onclick="closeModal()">
     <div class="bg-white rounded-2xl max-w-lg w-full max-h-[80vh] flex flex-col shadow-xl" onclick="event.stopPropagation()">
@@ -60,6 +110,49 @@
   <script>
     const API_BASE = '';
 
+    // ========== Toast ==========
+    let toastTimer = null;
+
+    function showToast(msg) {
+      const el = document.getElementById('toast');
+      el.textContent = msg;
+      el.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => el.classList.remove('show'), 2500);
+    }
+
+    // ========== 发布 ==========
+    async function publishPost() {
+      const input = document.getElementById('publisherInput');
+      const btn = document.getElementById('publishBtn');
+      const content = input.value.trim();
+      if (!content) return;
+
+      btn.disabled = true;
+      btn.textContent = '发布中...';
+
+      try {
+        const res = await fetch(`${API_BASE}/api/posts`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content }),
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || '发布失败');
+
+        input.value = '';
+        showToast('已同步至手机');
+        fetchPosts();
+      } catch (e) {
+        showToast('发布失败: ' + (e.message || e));
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '发布到手机';
+      }
+    }
+
+    // ========== 加载日记列表 ==========
     async function fetchPosts() {
       const loadingEl = document.getElementById('loading');
       const errorEl = document.getElementById('error');
@@ -101,12 +194,9 @@
       return `${y}年${m}月${day}日 星期${w}`;
     }
 
-    // 全文查看弹窗
-    let modalContent = '';
-
+    // ========== 全文查看弹窗 ==========
     function openModal(content) {
-      modalContent = content || '';
-      document.getElementById('modalBody').textContent = modalContent;
+      document.getElementById('modalBody').textContent = content || '';
       document.getElementById('modalOverlay').classList.remove('hidden');
       document.body.style.overflow = 'hidden';
     }
@@ -151,8 +241,17 @@
       return div.innerHTML;
     }
 
-    // 手动刷新
+    // ========== 事件绑定 ==========
     document.getElementById('refreshBtn').addEventListener('click', fetchPosts);
+    document.getElementById('publishBtn').addEventListener('click', publishPost);
+
+    // Ctrl+Enter 快捷键发布
+    document.getElementById('publisherInput').addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.key === 'Enter') {
+        e.preventDefault();
+        publishPost();
+      }
+    });
 
     // 自动加载
     fetchPosts();

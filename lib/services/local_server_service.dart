@@ -8,8 +8,10 @@ import 'package:shelf_router/shelf_router.dart';
 import 'package:network_info_plus/network_info_plus.dart';
 
 import 'package:flutter/services.dart' show rootBundle;
+import 'package:uuid/uuid.dart';
 
 import '../services/objectbox_store.dart';
+import '../models/post.dart';
 
 /// CORS 中间件：为所有响应添加跨域头
 ///
@@ -110,6 +112,34 @@ class LocalServerService {
         jsonEncode(list),
         headers: {'Content-Type': 'application/json'},
       );
+    });
+
+    // 从电脑端创建新日记
+    _router.post('/api/posts', (Request request) async {
+      try {
+        final body = await request.readAsString();
+        final data = jsonDecode(body) as Map<String, dynamic>;
+        final content = data['content'] as String? ?? '';
+
+        final post = Post(
+          uuid: const Uuid().v4(),
+          content: content,
+          updatedAt: DateTime.now(),
+          isDeleted: false,
+        );
+
+        ObjectBoxStore.instance.putPost(post);
+
+        return Response.ok(
+          jsonEncode({'success': true, 'id': post.id}),
+          headers: {'Content-Type': 'application/json'},
+        );
+      } catch (e) {
+        return Response.badRequest(
+          body: jsonEncode({'success': false, 'error': e.toString()}),
+          headers: {'Content-Type': 'application/json'},
+        );
+      }
     });
 
     // 提供图片文件流
