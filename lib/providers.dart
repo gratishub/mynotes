@@ -1,6 +1,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'services/objectbox_store.dart';
 import 'services/local_server_service.dart';
+import 'models/post.dart';
+import 'objectbox.g.dart';
 
 /// ObjectBox 数据库实例提供者
 ///
@@ -83,3 +85,18 @@ final lanServerProvider =
     NotifierProvider<LanServerNotifier, LanServerState>(
   LanServerNotifier.new,
 );
+
+/// 活跃帖子流 — 响应式数据源
+///
+/// 监听 ObjectBox 中 Post 实体的数据变更，自动推送最新列表。
+/// 过滤掉已删除的帖子，按更新时间降序排列。
+/// 手机端发布或电脑端通过 API 写入时，UI 自动刷新。
+final activePostsProvider = StreamProvider<List<Post>>((ref) {
+  final store = ref.watch(objectBoxProvider);
+
+  return store.postBox
+      .query(Post_.isDeleted.notEquals(true))
+      .order(Post_.updatedAt, flags: Order.descending)
+      .watch(triggerImmediately: true)
+      .map((query) => query.find());
+});

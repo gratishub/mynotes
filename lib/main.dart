@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'services/objectbox_store.dart';
+import 'services/background_service.dart';
 import 'ui/home_screen.dart';
 
 void main() async {
@@ -12,6 +13,10 @@ void main() async {
   // 此操作会打开或创建数据库文件，完成索引加载等准备工作。
   // 必须在 runApp 之前完成，因为 UI 依赖数据库实例。
   await ObjectBoxStore.init();
+
+  // 配置后台前台服务（通知渠道 + Service 回调注册）
+  // 不自动启动，仅在用户开启局域网同步时由 LanSyncScreen 激活。
+  await configureBackgroundService();
 
   // ProviderScope 是 Riverpod 的顶层容器
   // 所有 Provider 的实例都存储在这个容器中。

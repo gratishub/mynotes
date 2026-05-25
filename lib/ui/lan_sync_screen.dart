@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 
 import '../providers.dart';
 
@@ -37,11 +38,13 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen>
     final state = ref.read(lanServerProvider);
     if (state.isRunning) {
       await ref.read(lanServerProvider.notifier).stop();
+      FlutterBackgroundService().invoke('stopService');
       _pulseController.stop();
     } else {
       _pulseController.repeat(reverse: true);
       try {
         await ref.read(lanServerProvider.notifier).start();
+        FlutterBackgroundService().startService();
       } catch (_) {
         _pulseController.stop();
         if (mounted) {

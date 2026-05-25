@@ -46,6 +46,8 @@ dependencies:
   shelf: ^1.4.2
   shelf_router: ^1.1.4
   network_info_plus: ^8.1.0
+  flutter_background_service: ^5.1.0
+  flutter_local_notifications: ^21.0.0
 
 dev_dependencies:
   flutter_test:

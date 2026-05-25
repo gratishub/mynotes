@@ -42,10 +42,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final store = ref.watch(objectBoxProvider);
-    final posts = _selectedDate != null
-        ? store.getPostsByDate(_selectedDate!)
-        : store.getActivePosts();
+    final postsAsync = ref.watch(activePostsProvider);
 
     return Scaffold(
       body: Stack(
@@ -64,16 +61,36 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   sizeCurve: Curves.easeInOut,
                 ),
                 Expanded(
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 300),
-                    switchInCurve: Curves.easeInOut,
-                    switchOutCurve: Curves.easeInOut,
-                    transitionBuilder: (child, animation) {
-                      return FadeTransition(opacity: animation, child: child);
+                  child: postsAsync.when(
+                    data: (allPosts) {
+                      final posts = _selectedDate != null
+                          ? allPosts.where((p) =>
+                              p.updatedAt.year == _selectedDate!.year &&
+                              p.updatedAt.month == _selectedDate!.month &&
+                              p.updatedAt.day == _selectedDate!.day).toList()
+                          : allPosts;
+
+                      return AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 300),
+                        switchInCurve: Curves.easeInOut,
+                        switchOutCurve: Curves.easeInOut,
+                        transitionBuilder: (child, animation) {
+                          return FadeTransition(
+                              opacity: animation, child: child);
+                        },
+                        child: _isFeedView
+                            ? _buildFeedView(posts, key: const ValueKey('feed'))
+                            : _buildGridView(
+                                posts, key: const ValueKey('grid')),
+                      );
                     },
-                    child: _isFeedView
-                        ? _buildFeedView(posts, key: const ValueKey('feed'))
-                        : _buildGridView(posts, key: const ValueKey('grid')),
+                    loading: () => const Center(
+                      child: CircularProgressIndicator(),
+                    ),
+                    error: (err, _) => const Center(
+                      child: Text('加载失败',
+                          style: TextStyle(color: Colors.grey)),
+                    ),
                   ),
                 ),
               ],
@@ -178,7 +195,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => PublishScreen(post: post)),
     );
-    if (mounted) setState(() {});
   }
 
   // ============================================================
@@ -830,7 +846,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 await Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const PublishScreen()),
                 );
-                setState(() {});
               },
             ),
           ),
