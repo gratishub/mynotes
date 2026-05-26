@@ -227,6 +227,10 @@ class _PublishScreenState extends ConsumerState<PublishScreen> {
         }
       }
 
+      // 保存成功后强制刷新主页的日记列表
+      // activePostsProvider 是 StreamProvider，invalidate 会让它重新从 Stream 读取最新数据
+      ref.invalidate(activePostsProvider);
+
       _contentController.clear();
       setState(() {
         _selectedImages.clear();
