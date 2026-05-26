@@ -13,6 +13,8 @@ import '../services/export_service.dart';
 import 'export_filter_sheet.dart';
 import 'publish_screen.dart';
 import 'lan_sync_screen.dart';
+import 'statistics_screen.dart';
+import 'tags_screen.dart';
 import 'package:share_plus/share_plus.dart';
 
 /// 主界面 - 展示已发布的日记
@@ -916,11 +918,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         mainAxisAlignment: MainAxisAlignment.spaceEvenly,
         children: [
           _barIcon(Icons.bar_chart_rounded, () {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('统计功能即将上线'),
-                duration: Duration(seconds: 1),
-              ),
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const StatisticsScreen()),
             );
           }),
           _barIcon(Icons.photo_library_outlined, () {
@@ -947,11 +946,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
           ),
           _barIcon(Icons.local_offer_outlined, () {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('标签功能即将上线'),
-                duration: Duration(seconds: 1),
-              ),
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const TagsScreen()),
             );
           }),
           _barIcon(Icons.more_horiz_rounded, () {
