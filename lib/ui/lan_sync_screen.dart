@@ -45,11 +45,11 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen>
       try {
         await ref.read(lanServerProvider.notifier).start();
         FlutterBackgroundService().startService();
-      } catch (_) {
+      } catch (e) {
         _pulseController.stop();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('启动服务器失败，请检查网络状态')),
+            SnackBar(content: Text('启动服务器失败: $e')),
           );
         }
       }

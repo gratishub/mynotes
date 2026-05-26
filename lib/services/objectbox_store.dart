@@ -178,6 +178,21 @@ class ObjectBoxStore {
     return results;
   }
 
+  /// 获取可同步的帖子（升序，用于导出和 Obsidian 插件同步）
+  ///
+  /// 按 updatedAt 升序排列，保证数据顺序一致。
+  /// ObjectBox 会自动加载 tags 和 images 关联。
+  List<Post> getSyncablePosts() {
+    final query = postBox
+        .query(Post_.isDeleted.notEquals(true))
+        .order(Post_.updatedAt)
+        .build();
+
+    final results = query.find();
+    query.close();
+    return results;
+  }
+
   /// 带筛选条件的查询方法
   ///
   /// 支持时间范围 + 标签筛选，按时间升序返回。

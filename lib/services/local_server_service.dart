@@ -17,15 +17,16 @@ import '../models/image_meta.dart';
 
 /// CORS 中间件：为所有响应添加跨域头
 ///
-/// 允许来自任何来源的跨域请求，方便开发调试。
+/// 允许来自任何来源的跨域请求，支持 Obsidian Electron 环境。
 final _corsMiddleware = createMiddleware(
   requestHandler: (Request request) {
-    // 直接响应 OPTIONS 预检请求
+    // 直接响应 OPTIONS 预检请求（不走鉴权和业务逻辑）
     if (request.method == 'OPTIONS') {
       return Response.ok('', headers: {
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Origin, Content-Type, Authorization',
+        'Access-Control-Max-Age': '86400', // 缓存 24 小时，减少预检频率
       });
     }
     return null; // 其他请求继续处理
@@ -34,8 +35,9 @@ final _corsMiddleware = createMiddleware(
     return response.change(
       headers: {
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Origin, Content-Type, Authorization',
+        'Access-Control-Expose-Headers': 'Content-Length, Content-Type',
       },
     );
   },
@@ -120,7 +122,7 @@ class LocalServerService {
 
     // 同步端点（Obsidian 插件专用）
     _router.get('/api/sync', (Request request) {
-      final posts = ObjectBoxStore.instance.getActivePosts();
+      final posts = ObjectBoxStore.instance.getSyncablePosts();
 
       // 直接从 imageBox 查询所有图片，按 postId 建索引
       final allImages = ObjectBoxStore.instance.imageBox.getAll();
@@ -170,13 +172,15 @@ class LocalServerService {
 
     // 获取所有非删除状态的日记列表
     _router.get('/api/posts', (Request request) {
-      final posts = ObjectBoxStore.instance.getActivePosts();
+      final posts = ObjectBoxStore.instance.getSyncablePosts();
       final list = posts.map((post) {
         return {
           'uuid': post.uuid,
           'content': post.content,
           'tags': post.tags.map((tag) => tag.name).toList(),
-          'createdAt': post.createdAt.millisecondsSinceEpoch,
+          'createdAt': post.createdAt.millisecondsSinceEpoch > 946684800000
+              ? post.createdAt.millisecondsSinceEpoch
+              : post.updatedAt.millisecondsSinceEpoch,
           'updatedAt': post.updatedAt.millisecondsSinceEpoch,
           'images': post.images.map((img) {
             return {
@@ -235,7 +239,7 @@ class LocalServerService {
         });
       }
 
-      final posts = ObjectBoxStore.instance.getActivePosts();
+      final posts = ObjectBoxStore.instance.getSyncablePosts();
       final list = posts.map((post) {
         return {
           'postId': post.id,
@@ -285,6 +289,49 @@ class LocalServerService {
       return Response.ok(
         file.openRead(),
         headers: {'Content-Type': contentType},
+      );
+    });
+
+    // 静态资源下载路由（通过 path 查询参数指定本地绝对路径）
+    _router.get('/api/assets', (Request request) async {
+      final rawPath = request.url.queryParameters['path'];
+      if (rawPath == null || rawPath.isEmpty) {
+        return Response.notFound('Missing or empty path parameter');
+      }
+
+      // 解码 URL 编码的路径
+      final localPath = Uri.decodeComponent(rawPath);
+      final file = File(localPath);
+
+      if (!file.existsSync()) {
+        return Response.notFound('File not found: $localPath');
+      }
+
+      // 根据文件扩展名推断 content-type
+      final ext = localPath.split('.').last.toLowerCase();
+      final contentType = switch (ext) {
+        'jpg' || 'jpeg' => 'image/jpeg',
+        'png' => 'image/png',
+        'gif' => 'image/gif',
+        'webp' => 'image/webp',
+        'bmp' => 'image/bmp',
+        'svg' => 'image/svg+xml',
+        'pdf' => 'application/pdf',
+        'mp4' => 'video/mp4',
+        'mp3' => 'audio/mpeg',
+        _ => 'application/octet-stream',
+      };
+
+      final bytes = await file.readAsBytes();
+      final fileName = localPath.split(RegExp(r'[/\\]')).last;
+
+      return Response.ok(
+        bytes,
+        headers: {
+          'Content-Type': contentType,
+          'Content-Disposition': 'inline; filename="$fileName"',
+          'Content-Length': bytes.length.toString(),
+        },
       );
     });
 
@@ -363,6 +410,10 @@ class LocalServerService {
     // 尝试绑定端口，如果被占用则递增
     for (int attempt = 0; attempt < 10; attempt++) {
       try {
+        final targetPort = port + attempt;
+        // ignore: avoid_print
+        print('[LocalServer] 尝试绑定端口 $targetPort...');
+
         final handler = Pipeline()
             .addMiddleware(_corsMiddleware)
             .addMiddleware(_authMiddleware())
@@ -372,20 +423,21 @@ class LocalServerService {
         _server = await shelf_io.serve(
           handler,
           InternetAddress.anyIPv4,
-          port + attempt,
+          targetPort,
         );
-        _port = port + attempt;
+        _port = targetPort;
         // ignore: avoid_print
-        print('[LocalServer] 已启动: ${_server?.address.host}:$_port');
+        print('[LocalServer] 绑定端口 $targetPort 成功!');
         break;
-      } on SocketException catch (_) {
-        // 端口被占用，继续尝试下一个
-        continue;
+      } catch (e) {
+        // ignore: avoid_print
+        print('[LocalServer] 端口 ${port + attempt} 绑定失败: $e');
+        if (attempt < 9) continue;
       }
     }
 
     if (_server == null) {
-      throw StateError('无法启动服务器：端口 $port-${port + 9} 均被占用');
+      throw StateError('无法启动服务器：端口 $port-${port + 9} 均无法绑定');
     }
 
     return _port!;

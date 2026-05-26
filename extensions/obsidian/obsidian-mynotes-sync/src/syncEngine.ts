@@ -19,6 +19,8 @@ export interface PostInterface {
   images: PostImage[];
 }
 
+type DayKey = string;
+
 /* ── Date helpers ──────────────────────────────────── */
 
 function pad(n: number): string {
@@ -33,6 +35,15 @@ function formatDate(input: string | number): string {
 function formatDateForFile(input: string | number): string {
   const d = new Date(input);
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function getDayKey(input: string | number): DayKey {
+  const d = new Date(input);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function isSameDay(a: string | number, b: string | number): boolean {
+  return getDayKey(a) === getDayKey(b);
 }
 
 /* ── Network: fetch via Obsidian requestUrl ────────── */
@@ -52,39 +63,151 @@ export async function fetchSyncData(
   return resp.json as PostInterface[];
 }
 
+/* ── Image download helpers ─────────────────────────── */
+
+const IMAGES_FOLDER = "assets";
+
+function extractFileName(localPath: string): string {
+  const segments = localPath.split(/[/\\]/);
+  return segments[segments.length - 1] ?? "image.jpg";
+}
+
+async function downloadAsset(
+  serverAddress: string,
+  apiToken: string,
+  localPath: string
+): Promise<ArrayBuffer | null> {
+  const serverBase = serverAddress.replace(/\/+$/, "");
+  const encodedPath = encodeURIComponent(localPath);
+  const imgUrl = `${serverBase}/api/assets?path=${encodedPath}`;
+
+  console.log(`[MynotesSync] 下载图片: ${imgUrl}`);
+
+  try {
+    const resp = await requestUrl({
+      url: imgUrl,
+      headers: { Authorization: `Bearer ${apiToken}` },
+      throw: false,
+    });
+
+    console.log(`[MynotesSync] 图片响应: status=${resp.status}, arrayBuffer=${!!resp.arrayBuffer}, length=${resp.arrayBuffer?.byteLength}`);
+
+    if (resp.status === 200 && resp.arrayBuffer) {
+      return resp.arrayBuffer;
+    }
+    console.warn(`[MynotesSync] /api/assets 响应异常 status=${resp.status} path=${localPath}`);
+    return null;
+  } catch (e) {
+    console.error(`[MynotesSync] 下载图片失败: ${localPath}`, e);
+    return null;
+  }
+}
+
+async function ensureImagesFolder(plugin: MynotesSyncPlugin): Promise<void> {
+  const targetFolder = plugin.settings.targetVaultFolder.replace(/^\/|\/$/g, "") || "";
+  const folderPath = targetFolder ? `${targetFolder}/${IMAGES_FOLDER}` : IMAGES_FOLDER;
+
+  const existing = plugin.app.vault.getAbstractFileByPath(folderPath);
+  if (!existing) {
+    await plugin.app.vault.createFolder(folderPath);
+  }
+}
+
+async function downloadAndSaveImage(
+  plugin: MynotesSyncPlugin,
+  serverAddress: string,
+  apiToken: string,
+  img: PostImage,
+  existingImagePaths: Set<string>
+): Promise<string> {
+  const targetFolder = plugin.settings.targetVaultFolder.replace(/^\/|\/$/g, "") || "";
+  const folderPath = targetFolder ? `${targetFolder}/${IMAGES_FOLDER}` : IMAGES_FOLDER;
+
+  const fileName = extractFileName(img.localPath);
+  const imgPath = `${folderPath}/${fileName}`;
+
+  console.log(`[MynotesSync] 处理图片: localPath=${img.localPath} -> ${imgPath}`);
+
+  // 已存在则跳过
+  if (existingImagePaths.has(imgPath)) {
+    console.log(`[MynotesSync] 图片已存在，跳过: ${imgPath}`);
+    return `![[${IMAGES_FOLDER}/${fileName}]]`;
+  }
+
+  const arrayBuffer = await downloadAsset(serverAddress, apiToken, img.localPath);
+  if (!arrayBuffer) {
+    console.warn(`[MynotesSync] 图片下载失败，无法保存: ${imgPath}`);
+    return "";
+  }
+
+  try {
+    await plugin.app.vault.createBinary(imgPath, arrayBuffer);
+    console.log(`[MynotesSync] 图片已保存: ${imgPath} (${arrayBuffer.byteLength} bytes)`);
+    return `![[${IMAGES_FOLDER}/${fileName}]]`;
+  } catch (e) {
+    console.error(`[MynotesSync] 写入图片失败: ${imgPath}`, e);
+    return "";
+  }
+}
+
 /* ── Markdown generation ──────────────────────────── */
 
-export function generateMarkdown(
-  post: PostInterface,
-  settings: MynotesSyncSettings
+/**
+ * 生成一天所有帖子的整合 Markdown。
+ *
+ * - 按 createdAt 升序排列（早的在前）
+ * - YAML Frontmatter 使用该天所有帖子的去重标签
+ * - 每条帖子以 ### HH:mm 时间戳作为分割
+ * - 所有图片 wiki 链接追加在正文末尾
+ */
+export function generateDailyMarkdown(
+  dayKey: string,
+  posts: PostInterface[],
+  imageLinks: Map<string, string[]>
 ): string {
-  const date = formatDate(post.createdAt);
-  const updated = formatDate(post.updatedAt);
+  // 按 createdAt 升序
+  const sorted = [...posts].sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+  );
+
+  // 收集当天去重标签
+  const tagSet = new Set<string>();
+  for (const post of sorted) {
+    for (const tag of post.tags) tagSet.add(tag);
+  }
+  const tags = [...tagSet].sort();
   const safe = (s: string) => s.replace(/"/g, '\\"');
 
+  // YAML Frontmatter
   let fm = "---\n";
-  fm += `uuid: "${safe(post.uuid)}"\n`;
-  fm += `date: "${date}"\n`;
-  fm += `updated: "${updated}"\n`;
-  fm += "tags:\n";
-  for (const tag of post.tags) {
-    fm += `  - "${safe(tag)}"\n`;
+  fm += `date: "${dayKey}"\n`;
+  if (tags.length > 0) {
+    fm += "tags:\n";
+    for (const tag of tags) fm += `  - "${safe(tag)}"\n`;
   }
   fm += "---\n\n";
 
-  let body = post.content;
+  // 正文：每条帖子以 ### HH:mm 分割
+  let body = "";
+  for (const post of sorted) {
+    const timeStr = formatDate(post.createdAt).split(" ")[1];
+    body += `### ${timeStr}\n\n`;
 
-  for (const img of post.images) {
-    // 优先使用 downloadUrl 下载图片到本地，再以 wiki link 嵌入
-    if (img.downloadUrl && img.localPath) {
-      const fileName = img.localPath.split("/").pop() || `${post.uuid}.jpg`;
-      body += `\n![[${fileName}]]`;
-    } else if (settings.useRemoteImages && img.remoteUrl) {
-      body += `\n![image](${img.remoteUrl})`;
+    const trimmed = post.content.trim();
+    if (trimmed) {
+      body += trimmed + "\n\n";
     }
+
+    // 追加该帖子的图片
+    const links = imageLinks.get(post.uuid) ?? [];
+    for (const link of links) {
+      if (link) body += `${link}\n`;
+    }
+
+    body += "\n";
   }
 
-  return fm + body;
+  return fm + body.trim();
 }
 
 /* ── Main sync flow ───────────────────────────────── */
@@ -103,52 +226,88 @@ export async function executeSync(plugin: MynotesSyncPlugin): Promise<void> {
   setStatus("Mynotes Sync: 连接中…");
 
   try {
-    /* Fetch */
     setStatus("Mynotes Sync: 拉取数据中…");
     const posts = await fetchSyncData(settings.serverAddress, settings.apiToken);
-    const total = posts.length;
 
-    if (total === 0) {
+    if (posts.length === 0) {
       new Notice("Mynotes Sync: 没有需要同步的数据");
       return;
     }
 
-    /* Ensure target folder exists */
+    /* 按天分组 */
+    const dayGroups = new Map<DayKey, PostInterface[]>();
+    for (const post of posts) {
+      const dayKey = getDayKey(post.createdAt);
+      if (!dayGroups.has(dayKey)) dayGroups.set(dayKey, []);
+      dayGroups.get(dayKey)!.push(post);
+    }
+
+    const dayKeys = [...dayGroups.keys()].sort();
+    console.log(`[MynotesSync] 共有 ${dayKeys.length} 天的数据`);
+
+    /* 确保目录结构 */
     const folderPath = settings.targetVaultFolder.replace(/^\/|\/$/g, "") || "";
-    const imagesFolder = folderPath ? `${folderPath}/.mynotes-images` : ".mynotes-images";
 
     const ensureFolder = async (path: string) => {
       const existing = app.vault.getAbstractFileByPath(path);
-      if (!existing) {
-        await app.vault.createFolder(path);
-      }
+      if (!existing) await app.vault.createFolder(path);
     };
 
-    if (folderPath) {
-      await ensureFolder(folderPath);
-    }
-    await ensureFolder(imagesFolder);
+    if (folderPath) await ensureFolder(folderPath);
+    await ensureImagesFolder(plugin);
 
-    /* Process each post */
+    /* 预扫描已存在的图片，避免重复下载 */
+    const existingImagePaths = new Set<string>();
+    const imagesFolder = folderPath ? `${folderPath}/${IMAGES_FOLDER}` : IMAGES_FOLDER;
+    for (const file of app.vault.getFiles()) {
+      if (file.path.startsWith(imagesFolder + "/")) {
+        existingImagePaths.add(file.path);
+      }
+    }
+
+    /* 预下载所有图片，建立 uuid → [wikiLinks] 的映射 */
+    const imageLinksMap = new Map<string, string[]>();
+
+    for (const post of posts) {
+      const links: string[] = [];
+      for (const img of post.images) {
+        if (!img.localPath) continue;
+        const link = await downloadAndSaveImage(
+          plugin,
+          settings.serverAddress,
+          settings.apiToken,
+          img,
+          existingImagePaths
+        );
+        if (link) {
+          existingImagePaths.add(
+            `${imagesFolder}/${extractFileName(img.localPath)}`
+          );
+        }
+        links.push(link);
+      }
+      imageLinksMap.set(post.uuid, links);
+    }
+
+    /* 按天写入文件 */
     let synced = 0;
     let skipped = 0;
 
-    for (let i = 0; i < total; i++) {
-      const post = posts[i];
-      const fileName = `${formatDateForFile(post.createdAt)}.md`;
+    for (const dayKey of dayKeys) {
+      const dayPosts = dayGroups.get(dayKey)!;
+      const fileName = `${dayKey}.md`;
       const filePath = folderPath ? `${folderPath}/${fileName}` : fileName;
-      const content = generateMarkdown(post, settings);
 
+      const content = generateDailyMarkdown(dayKey, dayPosts, imageLinksMap);
       const existing = app.vault.getAbstractFileByPath(filePath);
 
       if (existing instanceof TFile) {
-        /* Conflict resolution: only overwrite if remote is newer */
         const cache = app.metadataCache.getFileCache(existing);
-        const localUpdated = cache?.frontmatter?.updated as string | undefined;
+        const localDate = cache?.frontmatter?.date as string | undefined;
 
-        if (localUpdated) {
-          const localTs = new Date(localUpdated).getTime();
-          const remoteTs = new Date(post.updatedAt).getTime();
+        if (localDate) {
+          const localTs = new Date(localDate).getTime();
+          const remoteTs = new Date(dayKey).getTime();
 
           if (remoteTs > localTs) {
             await app.vault.modify(existing, content);
@@ -165,34 +324,10 @@ export async function executeSync(plugin: MynotesSyncPlugin): Promise<void> {
         synced++;
       }
 
-      /* Download images for this post */
-      for (const img of post.images) {
-        if (!img.downloadUrl || !img.localPath) continue;
-
-        const fileName = img.localPath.split("/").pop() || `${post.uuid}.jpg`;
-        const imgPath = `${imagesFolder}/${fileName}`;
-
-        const imgExisting = app.vault.getAbstractFileByPath(imgPath);
-        if (!(imgExisting instanceof TFile)) {
-          const serverBase = settings.serverAddress.replace(/\/+$/, "");
-          const imgUrl = `${serverBase}${img.downloadUrl}`;
-          try {
-            const resp = await requestUrl({
-              url: imgUrl,
-              headers: { Authorization: `Bearer ${settings.apiToken}` },
-            });
-            const imgData = resp.arrayBuffer;
-            await app.vault.createBinary(imgPath, imgData);
-          } catch (e) {
-            // 下载失败不影响同步，跳过此图
-          }
-        }
-      }
-
-      setStatus(`Mynotes Sync: ${synced + skipped}/${total}`);
+      setStatus(`Mynotes Sync: ${synced + skipped}/${dayKeys.length} 天`);
     }
 
-    new Notice(`Mynotes Sync: 同步完成 — 新增/更新 ${synced} 条，跳过 ${skipped} 条`);
+    new Notice(`Mynotes Sync: 同步完成 — ${dayKeys.length} 天`);
   } catch (error) {
     new Notice(`Mynotes Sync: 同步失败 — ${error.message}`);
   } finally {

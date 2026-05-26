@@ -82,7 +82,7 @@ function formatDate(input) {
   const d = new Date(input);
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
-function formatDateForFile(input) {
+function getDayKey(input) {
   const d = new Date(input);
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
@@ -97,35 +97,108 @@ async function fetchSyncData(serverAddress, apiToken) {
   });
   return resp.json;
 }
-function generateMarkdown(post, settings) {
-  const date = formatDate(post.createdAt);
-  const updated = formatDate(post.updatedAt);
+var IMAGES_FOLDER = "assets";
+function extractFileName(localPath) {
+  var _a;
+  const segments = localPath.split(/[/\\]/);
+  return (_a = segments[segments.length - 1]) != null ? _a : "image.jpg";
+}
+async function downloadAsset(serverAddress, apiToken, localPath) {
+  var _a;
+  const serverBase = serverAddress.replace(/\/+$/, "");
+  const encodedPath = encodeURIComponent(localPath);
+  const imgUrl = `${serverBase}/api/assets?path=${encodedPath}`;
+  console.log(`[MynotesSync] \u4E0B\u8F7D\u56FE\u7247: ${imgUrl}`);
+  try {
+    const resp = await (0, import_obsidian2.requestUrl)({
+      url: imgUrl,
+      headers: { Authorization: `Bearer ${apiToken}` },
+      throw: false
+    });
+    console.log(`[MynotesSync] \u56FE\u7247\u54CD\u5E94: status=${resp.status}, arrayBuffer=${!!resp.arrayBuffer}, length=${(_a = resp.arrayBuffer) == null ? void 0 : _a.byteLength}`);
+    if (resp.status === 200 && resp.arrayBuffer) {
+      return resp.arrayBuffer;
+    }
+    console.warn(`[MynotesSync] /api/assets \u54CD\u5E94\u5F02\u5E38 status=${resp.status} path=${localPath}`);
+    return null;
+  } catch (e) {
+    console.error(`[MynotesSync] \u4E0B\u8F7D\u56FE\u7247\u5931\u8D25: ${localPath}`, e);
+    return null;
+  }
+}
+async function ensureImagesFolder(plugin) {
+  const targetFolder = plugin.settings.targetVaultFolder.replace(/^\/|\/$/g, "") || "";
+  const folderPath = targetFolder ? `${targetFolder}/${IMAGES_FOLDER}` : IMAGES_FOLDER;
+  const existing = plugin.app.vault.getAbstractFileByPath(folderPath);
+  if (!existing) {
+    await plugin.app.vault.createFolder(folderPath);
+  }
+}
+async function downloadAndSaveImage(plugin, serverAddress, apiToken, img, existingImagePaths) {
+  const targetFolder = plugin.settings.targetVaultFolder.replace(/^\/|\/$/g, "") || "";
+  const folderPath = targetFolder ? `${targetFolder}/${IMAGES_FOLDER}` : IMAGES_FOLDER;
+  const fileName = extractFileName(img.localPath);
+  const imgPath = `${folderPath}/${fileName}`;
+  console.log(`[MynotesSync] \u5904\u7406\u56FE\u7247: localPath=${img.localPath} -> ${imgPath}`);
+  if (existingImagePaths.has(imgPath)) {
+    console.log(`[MynotesSync] \u56FE\u7247\u5DF2\u5B58\u5728\uFF0C\u8DF3\u8FC7: ${imgPath}`);
+    return `![[${IMAGES_FOLDER}/${fileName}]]`;
+  }
+  const arrayBuffer = await downloadAsset(serverAddress, apiToken, img.localPath);
+  if (!arrayBuffer) {
+    console.warn(`[MynotesSync] \u56FE\u7247\u4E0B\u8F7D\u5931\u8D25\uFF0C\u65E0\u6CD5\u4FDD\u5B58: ${imgPath}`);
+    return "";
+  }
+  try {
+    await plugin.app.vault.createBinary(imgPath, arrayBuffer);
+    console.log(`[MynotesSync] \u56FE\u7247\u5DF2\u4FDD\u5B58: ${imgPath} (${arrayBuffer.byteLength} bytes)`);
+    return `![[${IMAGES_FOLDER}/${fileName}]]`;
+  } catch (e) {
+    console.error(`[MynotesSync] \u5199\u5165\u56FE\u7247\u5931\u8D25: ${imgPath}`, e);
+    return "";
+  }
+}
+function generateDailyMarkdown(dayKey, posts, imageLinks) {
+  var _a;
+  const sorted = [...posts].sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+  );
+  const tagSet = /* @__PURE__ */ new Set();
+  for (const post of sorted) {
+    for (const tag of post.tags)
+      tagSet.add(tag);
+  }
+  const tags = [...tagSet].sort();
   const safe = (s) => s.replace(/"/g, '\\"');
   let fm = "---\n";
-  fm += `uuid: "${safe(post.uuid)}"
+  fm += `date: "${dayKey}"
 `;
-  fm += `date: "${date}"
-`;
-  fm += `updated: "${updated}"
-`;
-  fm += "tags:\n";
-  for (const tag of post.tags) {
-    fm += `  - "${safe(tag)}"
+  if (tags.length > 0) {
+    fm += "tags:\n";
+    for (const tag of tags)
+      fm += `  - "${safe(tag)}"
 `;
   }
   fm += "---\n\n";
-  let body = post.content;
-  for (const img of post.images) {
-    if (img.downloadUrl && img.localPath) {
-      const fileName = img.localPath.split("/").pop() || `${post.uuid}.jpg`;
-      body += `
-![[${fileName}]]`;
-    } else if (settings.useRemoteImages && img.remoteUrl) {
-      body += `
-![image](${img.remoteUrl})`;
+  let body = "";
+  for (const post of sorted) {
+    const timeStr = formatDate(post.createdAt).split(" ")[1];
+    body += `### ${timeStr}
+
+`;
+    const trimmed = post.content.trim();
+    if (trimmed) {
+      body += trimmed + "\n\n";
     }
+    const links = (_a = imageLinks.get(post.uuid)) != null ? _a : [];
+    for (const link of links) {
+      if (link)
+        body += `${link}
+`;
+    }
+    body += "\n";
   }
-  return fm + body;
+  return fm + body.trim();
 }
 async function executeSync(plugin) {
   var _a;
@@ -140,37 +213,71 @@ async function executeSync(plugin) {
   try {
     setStatus("Mynotes Sync: \u62C9\u53D6\u6570\u636E\u4E2D\u2026");
     const posts = await fetchSyncData(settings.serverAddress, settings.apiToken);
-    const total = posts.length;
-    if (total === 0) {
+    if (posts.length === 0) {
       new import_obsidian2.Notice("Mynotes Sync: \u6CA1\u6709\u9700\u8981\u540C\u6B65\u7684\u6570\u636E");
       return;
     }
+    const dayGroups = /* @__PURE__ */ new Map();
+    for (const post of posts) {
+      const dayKey = getDayKey(post.createdAt);
+      if (!dayGroups.has(dayKey))
+        dayGroups.set(dayKey, []);
+      dayGroups.get(dayKey).push(post);
+    }
+    const dayKeys = [...dayGroups.keys()].sort();
+    console.log(`[MynotesSync] \u5171\u6709 ${dayKeys.length} \u5929\u7684\u6570\u636E`);
     const folderPath = settings.targetVaultFolder.replace(/^\/|\/$/g, "") || "";
-    const imagesFolder = folderPath ? `${folderPath}/.mynotes-images` : ".mynotes-images";
     const ensureFolder = async (path) => {
       const existing = app.vault.getAbstractFileByPath(path);
-      if (!existing) {
+      if (!existing)
         await app.vault.createFolder(path);
-      }
     };
-    if (folderPath) {
+    if (folderPath)
       await ensureFolder(folderPath);
+    await ensureImagesFolder(plugin);
+    const existingImagePaths = /* @__PURE__ */ new Set();
+    const imagesFolder = folderPath ? `${folderPath}/${IMAGES_FOLDER}` : IMAGES_FOLDER;
+    for (const file of app.vault.getFiles()) {
+      if (file.path.startsWith(imagesFolder + "/")) {
+        existingImagePaths.add(file.path);
+      }
     }
-    await ensureFolder(imagesFolder);
+    const imageLinksMap = /* @__PURE__ */ new Map();
+    for (const post of posts) {
+      const links = [];
+      for (const img of post.images) {
+        if (!img.localPath)
+          continue;
+        const link = await downloadAndSaveImage(
+          plugin,
+          settings.serverAddress,
+          settings.apiToken,
+          img,
+          existingImagePaths
+        );
+        if (link) {
+          existingImagePaths.add(
+            `${imagesFolder}/${extractFileName(img.localPath)}`
+          );
+        }
+        links.push(link);
+      }
+      imageLinksMap.set(post.uuid, links);
+    }
     let synced = 0;
     let skipped = 0;
-    for (let i = 0; i < total; i++) {
-      const post = posts[i];
-      const fileName = `${formatDateForFile(post.createdAt)}.md`;
+    for (const dayKey of dayKeys) {
+      const dayPosts = dayGroups.get(dayKey);
+      const fileName = `${dayKey}.md`;
       const filePath = folderPath ? `${folderPath}/${fileName}` : fileName;
-      const content = generateMarkdown(post, settings);
+      const content = generateDailyMarkdown(dayKey, dayPosts, imageLinksMap);
       const existing = app.vault.getAbstractFileByPath(filePath);
       if (existing instanceof import_obsidian2.TFile) {
         const cache = app.metadataCache.getFileCache(existing);
-        const localUpdated = (_a = cache == null ? void 0 : cache.frontmatter) == null ? void 0 : _a.updated;
-        if (localUpdated) {
-          const localTs = new Date(localUpdated).getTime();
-          const remoteTs = new Date(post.updatedAt).getTime();
+        const localDate = (_a = cache == null ? void 0 : cache.frontmatter) == null ? void 0 : _a.date;
+        if (localDate) {
+          const localTs = new Date(localDate).getTime();
+          const remoteTs = new Date(dayKey).getTime();
           if (remoteTs > localTs) {
             await app.vault.modify(existing, content);
             synced++;
@@ -185,29 +292,9 @@ async function executeSync(plugin) {
         await app.vault.create(filePath, content);
         synced++;
       }
-      for (const img of post.images) {
-        if (!img.downloadUrl || !img.localPath)
-          continue;
-        const fileName2 = img.localPath.split("/").pop() || `${post.uuid}.jpg`;
-        const imgPath = `${imagesFolder}/${fileName2}`;
-        const imgExisting = app.vault.getAbstractFileByPath(imgPath);
-        if (!(imgExisting instanceof import_obsidian2.TFile)) {
-          const serverBase = settings.serverAddress.replace(/\/+$/, "");
-          const imgUrl = `${serverBase}${img.downloadUrl}`;
-          try {
-            const resp = await (0, import_obsidian2.requestUrl)({
-              url: imgUrl,
-              headers: { Authorization: `Bearer ${settings.apiToken}` }
-            });
-            const imgData = resp.arrayBuffer;
-            await app.vault.createBinary(imgPath, imgData);
-          } catch (e) {
-          }
-        }
-      }
-      setStatus(`Mynotes Sync: ${synced + skipped}/${total}`);
+      setStatus(`Mynotes Sync: ${synced + skipped}/${dayKeys.length} \u5929`);
     }
-    new import_obsidian2.Notice(`Mynotes Sync: \u540C\u6B65\u5B8C\u6210 \u2014 \u65B0\u589E/\u66F4\u65B0 ${synced} \u6761\uFF0C\u8DF3\u8FC7 ${skipped} \u6761`);
+    new import_obsidian2.Notice(`Mynotes Sync: \u540C\u6B65\u5B8C\u6210 \u2014 ${dayKeys.length} \u5929`);
   } catch (error) {
     new import_obsidian2.Notice(`Mynotes Sync: \u540C\u6B65\u5931\u8D25 \u2014 ${error.message}`);
   } finally {

@@ -4,7 +4,6 @@ import 'package:intl/intl.dart';
 import 'package:archive/archive_io.dart';
 import 'package:path_provider/path_provider.dart';
 
-import '../objectbox.g.dart';
 import '../services/objectbox_store.dart';
 import '../models/post.dart';
 
@@ -13,16 +12,9 @@ import '../models/post.dart';
 /// 负责从 ObjectBox 中查询所有非软删除的日记，
 /// 按天聚合，并组装为带 YAML Frontmatter 的 Markdown 字符串。
 class ExportService {
-  /// 查询所有非软删除的帖子，按 updatedAt 严格升序排列
+  /// 查询所有非软删除的帖子（升序）
   static List<Post> getAllPostsAscending() {
-    final query = ObjectBoxStore.instance.postBox
-        .query(Post_.isDeleted.notEquals(true))
-        .order(Post_.updatedAt) // 默认升序
-        .build();
-
-    final results = query.find();
-    query.close();
-    return results;
+    return ObjectBoxStore.instance.getSyncablePosts();
   }
 
   /// 按天分组（yyyy-MM-dd）
