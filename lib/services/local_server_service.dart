@@ -57,9 +57,13 @@ class LocalServerService {
   late final Router _router;
   int? _port;
   String? _cachedHtml; // 缓存 Web 页面
+  String? _apiToken; // API 鉴权 Token
 
   /// 服务器是否正在运行
   bool get isRunning => _server != null;
+
+  /// 当前 API 鉴权 Token（8 位随机字符串，用于桌面端请求鉴权）
+  String? get apiToken => _apiToken;
 
   /// 服务器监听的端口号（未启动时为 null）
   int? get port => _port;
@@ -68,6 +72,38 @@ class LocalServerService {
   LocalServerService() {
     _router = Router();
     _setupRoutes();
+  }
+
+  /// API 鉴权中间件
+  ///
+  /// 除 `/`（Web 主页）和 `/api/ping`（连通性测试）外，
+  /// 所有 `/api/*` 请求必须携带 `Authorization: Bearer <_apiToken>` 头。
+  /// Token 不匹配或缺失时返回 401 Unauthorized。
+  Middleware _authMiddleware() {
+    return (Handler innerHandler) {
+      return (Request request) async {
+        // 放行 Web 主页和 ping
+        final path = request.requestedUri.path;
+        if (path == '/' || path == '/api/ping') {
+          return innerHandler(request);
+        }
+
+        // 仅对 /api/* 路径检查鉴权
+        if (path.startsWith('/api/')) {
+          final authHeader = request.headers['authorization'];
+          if (authHeader == null || !authHeader.startsWith('Bearer ')) {
+            return Response.unauthorized('Missing or invalid Authorization header');
+          }
+
+          final token = authHeader.substring('Bearer '.length).trim();
+          if (token != _apiToken) {
+            return Response.unauthorized('Invalid API token');
+          }
+        }
+
+        return innerHandler(request);
+      };
+    };
   }
 
   /// 注册所有 API 路由
@@ -96,14 +132,15 @@ class LocalServerService {
       final posts = ObjectBoxStore.instance.getActivePosts();
       final list = posts.map((post) {
         return {
-          'id': post.id,
           'uuid': post.uuid,
           'content': post.content,
+          'tags': post.tags.map((tag) => tag.name).toList(),
+          'createdAt': post.createdAt.millisecondsSinceEpoch,
           'updatedAt': post.updatedAt.millisecondsSinceEpoch,
           'images': post.images.map((img) {
             return {
-              'id': img.id,
-              'url': '/api/images/${img.id}',
+              'localPath': img.localPath,
+              'remoteUrl': '',
             };
           }).toList(),
         };
@@ -207,11 +244,15 @@ class LocalServerService {
       throw StateError('无法加载内置 Web 页面，请确认 assets/web/index.html 已正确打包');
     }
 
+    // 生成新的 API Token
+    _apiToken = const Uuid().v4().substring(0, 8);
+
     // 尝试绑定端口，如果被占用则递增
     for (int attempt = 0; attempt < 10; attempt++) {
       try {
         final handler = Pipeline()
             .addMiddleware(_corsMiddleware)
+            .addMiddleware(_authMiddleware())
             .addMiddleware(_loggingMiddleware)
             .addHandler(_router.call);
 
@@ -242,6 +283,7 @@ class LocalServerService {
     await _server?.close(force: true);
     _server = null;
     _port = null;
+    _apiToken = null;
   }
 
   /// 获取当前手机的局域网 IP 地址

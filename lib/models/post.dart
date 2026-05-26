@@ -53,6 +53,14 @@ class Post {
   @Property(type: PropertyType.date)
   DateTime updatedAt;
 
+  /// 创建时间
+  ///
+  /// 帖子首次创建的时间戳，写入后不再变更。
+  /// 与 updatedAt 不同，createdAt 不受内容修改影响，
+  /// 可用于按创建时间排序和展示。
+  @Property(type: PropertyType.date)
+  DateTime createdAt;
+
   /// 软删除标记
   ///
   /// true = 已删除（进入回收站）
@@ -101,5 +109,6 @@ class Post {
     this.content = '',
     required this.updatedAt,
     this.isDeleted = false,
-  });
+    DateTime? createdAt,
+  }) : createdAt = createdAt ?? DateTime.now();
 }

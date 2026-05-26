@@ -22,22 +22,26 @@ class LanServerState {
   final bool isRunning;
   final String? ipAddress;
   final int? port;
+  final String? apiToken;
 
   const LanServerState({
     this.isRunning = false,
     this.ipAddress,
     this.port,
+    this.apiToken,
   });
 
   LanServerState copyWith({
     bool? isRunning,
     String? ipAddress,
     int? port,
+    String? apiToken,
   }) {
     return LanServerState(
       isRunning: isRunning ?? this.isRunning,
       ipAddress: ipAddress ?? this.ipAddress,
       port: port ?? this.port,
+      apiToken: apiToken ?? this.apiToken,
     );
   }
 
@@ -63,7 +67,12 @@ class LanServerNotifier extends Notifier<LanServerState> {
   Future<void> start() async {
     final port = await _service.start();
     final ip = await _service.getIpAddress();
-    state = LanServerState(isRunning: true, ipAddress: ip, port: port);
+    state = LanServerState(
+      isRunning: true,
+      ipAddress: ip,
+      port: port,
+      apiToken: _service.apiToken,
+    );
   }
 
   /// 停止服务

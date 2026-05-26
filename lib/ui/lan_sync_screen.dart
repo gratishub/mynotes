@@ -72,6 +72,22 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen>
     }
   }
 
+  void _copyToken() {
+    final state = ref.read(lanServerProvider);
+    if (state.apiToken == null || state.apiToken!.isEmpty) return;
+    Clipboard.setData(ClipboardData(text: state.apiToken!));
+    if (mounted) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Token 已复制到剪贴板'),
+          duration: Duration(seconds: 1),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(lanServerProvider);
@@ -165,6 +181,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen>
 
             // ——— 地址卡片 ———
             if (state.isRunning) ...[
+              // ——— 地址卡片 ———
               Container(
                 margin: const EdgeInsets.symmetric(horizontal: 32),
                 padding:
@@ -208,6 +225,56 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen>
               const SizedBox(height: 12),
               Text(
                 '在电脑浏览器中打开此地址',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.white.withAlpha(100),
+                ),
+              ),
+              const SizedBox(height: 24),
+              // ——— API Token 卡片 ———
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 32),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+                decoration: BoxDecoration(
+                  color: Colors.white.withAlpha(15),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.white.withAlpha(25)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.vpn_key_rounded,
+                        size: 18, color: const Color(0xFF00D2FF)),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: SelectableText(
+                        state.apiToken ?? '',
+                        style: const TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w500,
+                          color: Colors.white,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF00D2FF).withAlpha(30),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: IconButton(
+                        icon: const Icon(Icons.copy_rounded, size: 18),
+                        color: const Color(0xFF00D2FF),
+                        onPressed: _copyToken,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                '在桌面端 Obsidian 插件中配置此 Token',
                 style: TextStyle(
                   fontSize: 12,
                   color: Colors.white.withAlpha(100),
