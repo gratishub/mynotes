@@ -86,7 +86,7 @@ class ObjectBoxStore {
     // 参数说明：
     //   directory: 数据库文件的存储路径；如果不指定，ObjectBox 会使用默认路径
     //   queriesCaseSensitiveDefault: 默认查询区分大小写（保持与 SQL 一致的行为）
-    final store = openStore(
+    final store = await openStore(
       directory: '${dir.path}/objectbox',
       queriesCaseSensitiveDefault: true,
     );

@@ -8,10 +8,12 @@ import 'package:shelf_router/shelf_router.dart';
 import 'package:network_info_plus/network_info_plus.dart';
 
 import 'package:flutter/services.dart' show rootBundle;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 import '../services/objectbox_store.dart';
 import '../models/post.dart';
+import '../models/image_meta.dart';
 
 /// CORS 中间件：为所有响应添加跨域头
 ///
@@ -59,6 +61,9 @@ class LocalServerService {
   String? _cachedHtml; // 缓存 Web 页面
   String? _apiToken; // API 鉴权 Token
 
+  /// Token 仅在首次启动时生成，之后复用
+  static String? _persistentToken;
+
   /// 服务器是否正在运行
   bool get isRunning => _server != null;
 
@@ -82,14 +87,14 @@ class LocalServerService {
   Middleware _authMiddleware() {
     return (Handler innerHandler) {
       return (Request request) async {
-        // 放行 Web 主页和 ping
+        // 放行 Web 主页、ping 和调试端点
         final path = request.requestedUri.path;
-        if (path == '/' || path == '/api/ping') {
+        if (path == '/' || path == '/api/ping' || path.startsWith('/api/debug')) {
           return innerHandler(request);
         }
 
-        // 仅对 /api/* 路径检查鉴权
-        if (path.startsWith('/api/')) {
+        // 仅对非图片下载的 /api/* 路径检查鉴权
+        if (path.startsWith('/api/') && !path.startsWith('/api/images/')) {
           final authHeader = request.headers['authorization'];
           if (authHeader == null || !authHeader.startsWith('Bearer ')) {
             return Response.unauthorized('Missing or invalid Authorization header');
@@ -111,6 +116,42 @@ class LocalServerService {
     // 测试连通性
     _router.get('/api/ping', (Request request) {
       return Response.ok('Server is running');
+    });
+
+    // 同步端点（Obsidian 插件专用）
+    _router.get('/api/sync', (Request request) {
+      final posts = ObjectBoxStore.instance.getActivePosts();
+
+      // 直接从 imageBox 查询所有图片，按 postId 建索引
+      final allImages = ObjectBoxStore.instance.imageBox.getAll();
+      final imageMap = <int, List<ImageMeta>>{};
+      for (final img in allImages) {
+        imageMap.putIfAbsent(img.post.targetId, () => []);
+        imageMap[img.post.targetId]!.add(img);
+      }
+
+      final list = posts.map((post) {
+        return {
+          'uuid': post.uuid,
+          'content': post.content,
+          'tags': post.tags.map((tag) => tag.name).toList(),
+          'createdAt': post.createdAt.millisecondsSinceEpoch > 946684800000
+              ? post.createdAt.millisecondsSinceEpoch
+              : post.updatedAt.millisecondsSinceEpoch,
+          'updatedAt': post.updatedAt.millisecondsSinceEpoch,
+          'images': (imageMap[post.id] ?? []).map((img) {
+            return {
+              'localPath': img.localPath,
+              'remoteUrl': '',
+              'downloadUrl': '/api/images/${img.id}/download',
+            };
+          }).toList(),
+        };
+      }).toList();
+      return Response.ok(
+        jsonEncode(list),
+        headers: {'Content-Type': 'application/json'},
+      );
     });
 
     // 提供 Web 前端页面
@@ -179,6 +220,40 @@ class LocalServerService {
       }
     });
 
+    // 调试端点：返回 posts 及其关联图片的详细信息
+    _router.get('/api/debug/posts', (Request request) {
+      // 直接从 imageBox 查询所有图片，再按 postId 分组
+      final allImages = ObjectBoxStore.instance.imageBox.getAll();
+      final imageMap = <int, List<Map<String, dynamic>>>{};
+      for (final img in allImages) {
+        final pid = img.post.targetId;
+        imageMap.putIfAbsent(pid, () => []);
+        imageMap[pid]!.add({
+          'id': img.id,
+          'localPath': img.localPath,
+          'postId': pid,
+        });
+      }
+
+      final posts = ObjectBoxStore.instance.getActivePosts();
+      final list = posts.map((post) {
+        return {
+          'postId': post.id,
+          'uuid': post.uuid,
+          'createdAt': post.createdAt.millisecondsSinceEpoch > 946684800000
+              ? post.createdAt.millisecondsSinceEpoch
+              : post.updatedAt.millisecondsSinceEpoch,
+          'updatedAt': post.updatedAt.millisecondsSinceEpoch,
+          'imageCount': imageMap[post.id]?.length ?? 0,
+          'images': imageMap[post.id] ?? [],
+        };
+      }).toList();
+      return Response.ok(
+        jsonEncode(list),
+        headers: {'Content-Type': 'application/json'},
+      );
+    });
+
     // 提供图片文件流
     _router.get('/api/images/<id>', (Request request, String id) {
       final imageId = int.tryParse(id);
@@ -210,6 +285,36 @@ class LocalServerService {
       return Response.ok(
         file.openRead(),
         headers: {'Content-Type': contentType},
+      );
+    });
+
+    // 下载图片（Obsidian 插件同步图片用，返回原始文件字节流）
+    _router.get('/api/images/<id>/download', (Request request, String id) async {
+      final imageId = int.tryParse(id);
+      if (imageId == null) {
+        return Response.badRequest(body: 'Invalid image ID');
+      }
+
+      final image = ObjectBoxStore.instance.imageBox.get(imageId);
+      if (image == null) {
+        return Response.notFound('Image not found');
+      }
+
+      final file = File(image.localPath);
+      if (!file.existsSync()) {
+        return Response.notFound('Image file not found');
+      }
+
+      // 返回原始文件数据，不做 content-type 转换
+      final bytes = await file.readAsBytes();
+      final fileName = image.localPath.split('/').last;
+
+      return Response.ok(
+        bytes,
+        headers: {
+          'Content-Type': 'application/octet-stream',
+          'Content-Disposition': 'attachment; filename="$fileName"',
+        },
       );
     });
   }
@@ -244,8 +349,16 @@ class LocalServerService {
       throw StateError('无法加载内置 Web 页面，请确认 assets/web/index.html 已正确打包');
     }
 
-    // 生成新的 API Token
-    _apiToken = const Uuid().v4().substring(0, 8);
+    // 加载或生成 API Token（持久化）
+    if (_persistentToken == null) {
+      final prefs = await SharedPreferences.getInstance();
+      _persistentToken = prefs.getString('lan_api_token');
+      if (_persistentToken == null) {
+        _persistentToken = const Uuid().v4().substring(0, 8);
+        await prefs.setString('lan_api_token', _persistentToken!);
+      }
+    }
+    _apiToken = _persistentToken;
 
     // 尝试绑定端口，如果被占用则递增
     for (int attempt = 0; attempt < 10; attempt++) {
@@ -375,5 +488,14 @@ class LocalServerService {
     _server?.close(force: true);
     _server = null;
     _port = null;
+  }
+
+  /// 刷新 Token（手动重新生成并持久化）
+  Future<void> refreshToken() async {
+    final newToken = const Uuid().v4().substring(0, 8);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('lan_api_token', newToken);
+    _persistentToken = newToken;
+    _apiToken = newToken;
   }
 }

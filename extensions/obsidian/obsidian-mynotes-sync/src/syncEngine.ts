@@ -7,6 +7,7 @@ import { MynotesSyncSettings } from "./settings";
 export interface PostImage {
   localPath: string;
   remoteUrl?: string;
+  downloadUrl?: string;
 }
 
 export interface PostInterface {
@@ -31,7 +32,7 @@ function formatDate(input: string | number): string {
 
 function formatDateForFile(input: string | number): string {
   const d = new Date(input);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
 /* ── Network: fetch via Obsidian requestUrl ────────── */
@@ -74,11 +75,12 @@ export function generateMarkdown(
   let body = post.content;
 
   for (const img of post.images) {
-    if (settings.useRemoteImages && img.remoteUrl) {
+    // 优先使用 downloadUrl 下载图片到本地，再以 wiki link 嵌入
+    if (img.downloadUrl && img.localPath) {
+      const fileName = img.localPath.split("/").pop() || `${post.uuid}.jpg`;
+      body += `\n![[${fileName}]]`;
+    } else if (settings.useRemoteImages && img.remoteUrl) {
       body += `\n![image](${img.remoteUrl})`;
-    } else {
-      const name = img.localPath.split("/").pop() || `${post.uuid}.jpg`;
-      body += `\n![[${name}]]`;
     }
   }
 
@@ -113,12 +115,19 @@ export async function executeSync(plugin: MynotesSyncPlugin): Promise<void> {
 
     /* Ensure target folder exists */
     const folderPath = settings.targetVaultFolder.replace(/^\/|\/$/g, "") || "";
-    if (folderPath) {
-      const existing = app.vault.getAbstractFileByPath(folderPath);
+    const imagesFolder = folderPath ? `${folderPath}/.mynotes-images` : ".mynotes-images";
+
+    const ensureFolder = async (path: string) => {
+      const existing = app.vault.getAbstractFileByPath(path);
       if (!existing) {
-        await app.vault.createFolder(folderPath);
+        await app.vault.createFolder(path);
       }
+    };
+
+    if (folderPath) {
+      await ensureFolder(folderPath);
     }
+    await ensureFolder(imagesFolder);
 
     /* Process each post */
     let synced = 0;
@@ -154,6 +163,30 @@ export async function executeSync(plugin: MynotesSyncPlugin): Promise<void> {
       } else {
         await app.vault.create(filePath, content);
         synced++;
+      }
+
+      /* Download images for this post */
+      for (const img of post.images) {
+        if (!img.downloadUrl || !img.localPath) continue;
+
+        const fileName = img.localPath.split("/").pop() || `${post.uuid}.jpg`;
+        const imgPath = `${imagesFolder}/${fileName}`;
+
+        const imgExisting = app.vault.getAbstractFileByPath(imgPath);
+        if (!(imgExisting instanceof TFile)) {
+          const serverBase = settings.serverAddress.replace(/\/+$/, "");
+          const imgUrl = `${serverBase}${img.downloadUrl}`;
+          try {
+            const resp = await requestUrl({
+              url: imgUrl,
+              headers: { Authorization: `Bearer ${settings.apiToken}` },
+            });
+            const imgData = resp.arrayBuffer;
+            await app.vault.createBinary(imgPath, imgData);
+          } catch (e) {
+            // 下载失败不影响同步，跳过此图
+          }
+        }
       }
 
       setStatus(`Mynotes Sync: ${synced + skipped}/${total}`);

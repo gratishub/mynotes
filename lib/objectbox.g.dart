@@ -12,6 +12,7 @@ import 'package:flat_buffers/flat_buffers.dart' as fb;
 import 'package:objectbox/internal.dart'
     as obx_int; // generated code can access "internal" functionality
 import 'package:objectbox/objectbox.dart' as obx;
+import 'package:objectbox_flutter_libs/objectbox_flutter_libs.dart';
 
 import 'models/image_meta.dart';
 import 'models/post.dart';
@@ -77,7 +78,7 @@ final _entities = <obx_int.ModelEntity>[
   obx_int.ModelEntity(
     id: const obx_int.IdUid(3, 1551219590584248299),
     name: 'Post',
-    lastPropertyId: const obx_int.IdUid(5, 1284081191498630664),
+    lastPropertyId: const obx_int.IdUid(6, 8070617016397980167),
     flags: 0,
     properties: <obx_int.ModelProperty>[
       obx_int.ModelProperty(
@@ -111,6 +112,12 @@ final _entities = <obx_int.ModelEntity>[
         flags: 8,
         indexId: const obx_int.IdUid(3, 7031885950109081293),
       ),
+      obx_int.ModelProperty(
+        id: const obx_int.IdUid(6, 8070617016397980167),
+        name: 'createdAt',
+        type: 10,
+        flags: 0,
+      ),
     ],
     relations: <obx_int.ModelRelation>[
       obx_int.ModelRelation(
@@ -140,7 +147,7 @@ final _entities = <obx_int.ModelEntity>[
 /// For Flutter apps, also calls `loadObjectBoxLibraryAndroidCompat()` from
 /// the ObjectBox Flutter library to fix loading the native ObjectBox library
 /// on Android 6 and older.
-obx.Store openStore({
+Future<obx.Store> openStore({
   String? directory,
   int? maxDBSizeInKB,
   int? maxDataSizeInKB,
@@ -148,10 +155,11 @@ obx.Store openStore({
   int? maxReaders,
   bool queriesCaseSensitiveDefault = true,
   String? macosApplicationGroup,
-}) {
+}) async {
+  await loadObjectBoxLibraryAndroidCompat();
   return obx.Store(
     getObjectBoxModel(),
-    directory: directory,
+    directory: directory ?? (await defaultStoreDirectory()).path,
     maxDBSizeInKB: maxDBSizeInKB,
     maxDataSizeInKB: maxDataSizeInKB,
     fileMode: fileMode,
@@ -276,12 +284,13 @@ obx_int.ModelDefinition getObjectBoxModel() {
       objectToFB: (Post object, fb.Builder fbb) {
         final uuidOffset = fbb.writeString(object.uuid);
         final contentOffset = fbb.writeString(object.content);
-        fbb.startTable(6);
+        fbb.startTable(7);
         fbb.addInt64(0, object.id);
         fbb.addOffset(1, uuidOffset);
         fbb.addOffset(2, contentOffset);
         fbb.addInt64(3, object.updatedAt.millisecondsSinceEpoch);
         fbb.addBool(4, object.isDeleted);
+        fbb.addInt64(5, object.createdAt.millisecondsSinceEpoch);
         fbb.finish(fbb.endTable());
         return object.id;
       },
@@ -309,12 +318,16 @@ obx_int.ModelDefinition getObjectBoxModel() {
           12,
           false,
         );
+        final createdAtParam = DateTime.fromMillisecondsSinceEpoch(
+          const fb.Int64Reader().vTableGet(buffer, rootOffset, 14, 0),
+        );
         final object = Post(
           id: idParam,
           uuid: uuidParam,
           content: contentParam,
           updatedAt: updatedAtParam,
           isDeleted: isDeletedParam,
+          createdAt: createdAtParam,
         );
         obx_int.InternalToManyAccess.setRelInfo<Post>(
           object.tags,
@@ -386,6 +399,11 @@ class Post_ {
   /// See [Post.isDeleted].
   static final isDeleted = obx.QueryBooleanProperty<Post>(
     _entities[2].properties[4],
+  );
+
+  /// See [Post.createdAt].
+  static final createdAt = obx.QueryDateProperty<Post>(
+    _entities[2].properties[5],
   );
 
   /// see [Post.tags]

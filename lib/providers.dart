@@ -88,6 +88,14 @@ class LanServerNotifier extends Notifier<LanServerState> {
       state = state.copyWith(ipAddress: ip);
     }
   }
+
+  /// 刷新 Token（手动重新生成）
+  Future<void> refreshToken() async {
+    await _service.refreshToken();
+    if (state.isRunning) {
+      state = state.copyWith(apiToken: _service.apiToken);
+    }
+  }
 }
 
 final lanServerProvider =

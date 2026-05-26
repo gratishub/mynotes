@@ -84,7 +84,7 @@ function formatDate(input) {
 }
 function formatDateForFile(input) {
   const d = new Date(input);
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 async function fetchSyncData(serverAddress, apiToken) {
   const resp = await (0, import_obsidian2.requestUrl)({
@@ -116,13 +116,13 @@ function generateMarkdown(post, settings) {
   fm += "---\n\n";
   let body = post.content;
   for (const img of post.images) {
-    if (settings.useRemoteImages && img.remoteUrl) {
+    if (img.downloadUrl && img.localPath) {
+      const fileName = img.localPath.split("/").pop() || `${post.uuid}.jpg`;
+      body += `
+![[${fileName}]]`;
+    } else if (settings.useRemoteImages && img.remoteUrl) {
       body += `
 ![image](${img.remoteUrl})`;
-    } else {
-      const name = img.localPath.split("/").pop() || `${post.uuid}.jpg`;
-      body += `
-![[${name}]]`;
     }
   }
   return fm + body;
@@ -146,12 +146,17 @@ async function executeSync(plugin) {
       return;
     }
     const folderPath = settings.targetVaultFolder.replace(/^\/|\/$/g, "") || "";
-    if (folderPath) {
-      const existing = app.vault.getAbstractFileByPath(folderPath);
+    const imagesFolder = folderPath ? `${folderPath}/.mynotes-images` : ".mynotes-images";
+    const ensureFolder = async (path) => {
+      const existing = app.vault.getAbstractFileByPath(path);
       if (!existing) {
-        await app.vault.createFolder(folderPath);
+        await app.vault.createFolder(path);
       }
+    };
+    if (folderPath) {
+      await ensureFolder(folderPath);
     }
+    await ensureFolder(imagesFolder);
     let synced = 0;
     let skipped = 0;
     for (let i = 0; i < total; i++) {
@@ -179,6 +184,26 @@ async function executeSync(plugin) {
       } else {
         await app.vault.create(filePath, content);
         synced++;
+      }
+      for (const img of post.images) {
+        if (!img.downloadUrl || !img.localPath)
+          continue;
+        const fileName2 = img.localPath.split("/").pop() || `${post.uuid}.jpg`;
+        const imgPath = `${imagesFolder}/${fileName2}`;
+        const imgExisting = app.vault.getAbstractFileByPath(imgPath);
+        if (!(imgExisting instanceof import_obsidian2.TFile)) {
+          const serverBase = settings.serverAddress.replace(/\/+$/, "");
+          const imgUrl = `${serverBase}${img.downloadUrl}`;
+          try {
+            const resp = await (0, import_obsidian2.requestUrl)({
+              url: imgUrl,
+              headers: { Authorization: `Bearer ${settings.apiToken}` }
+            });
+            const imgData = resp.arrayBuffer;
+            await app.vault.createBinary(imgPath, imgData);
+          } catch (e) {
+          }
+        }
       }
       setStatus(`Mynotes Sync: ${synced + skipped}/${total}`);
     }
