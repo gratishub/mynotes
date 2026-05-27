@@ -159,11 +159,15 @@ class LocalServerService {
             request.headers['x-real-ip'] ??
             _extractClientIp(request);
         final ua = request.headers['user-agent'] ?? 'Unknown';
-        _clients[ip] = _ClientInfo(
-          ip: ip,
-          userAgent: ua,
-          lastSeen: DateTime.now(),
-        );
+        // 忽略本机请求（心跳检测等）
+        if (ip != '127.0.0.1' && ip != '::1' && ip != 'unknown') {
+          final key = '$ip|$ua';
+          _clients[key] = _ClientInfo(
+            ip: ip,
+            userAgent: ua,
+            lastSeen: DateTime.now(),
+          );
+        }
         return innerHandler(request);
       };
     };

@@ -152,9 +152,10 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen>
         centerTitle: true,
       ),
       body: SafeArea(
-        child: Column(
-          children: [
-            const Spacer(flex: 2),
+        child: SingleChildScrollView(
+          child: Column(
+            children: [
+              const SizedBox(height: 40),
 
             // ——— 状态图标 & 大开关 ———
             GestureDetector(
@@ -345,7 +346,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen>
               _buildClientsSection(),
             ],
 
-            const Spacer(flex: 2),
+            const SizedBox(height: 32),
 
             // ——— 底部温馨提示 ———
             Container(
@@ -376,7 +377,8 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen>
                 ],
               ),
             ),
-          ],
+            ],
+          ),
         ),
       ),
     );
