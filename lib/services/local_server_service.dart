@@ -6,6 +6,7 @@ import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'package:shelf_router/shelf_router.dart';
 import 'package:network_info_plus/network_info_plus.dart';
+import 'package:path_provider/path_provider.dart';
 
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -63,8 +64,11 @@ class LocalServerService {
   HttpServer? _server;
   late final Router _router;
   int? _port;
-  String? _cachedHtml; // 缓存 Web 页面
   String? _apiToken; // API 鉴权 Token
+  String? _imagesDirPath; // 图片目录绝对路径缓存
+
+  /// 已连接客户端追踪（IP → 客户端信息）
+  final Map<String, _ClientInfo> _clients = {};
 
   /// Token 仅在首次启动时生成，之后复用
   static String? _persistentToken;
@@ -144,6 +148,39 @@ class LocalServerService {
     return -1;
   }
 
+  /// 客户端追踪中间件
+  ///
+  /// 记录每个请求的 IP、User-Agent 和最后活跃时间。
+  /// 超过 30 秒未请求的客户端会被自动清理。
+  Middleware _clientTrackingMiddleware() {
+    return (Handler innerHandler) {
+      return (Request request) async {
+        final ip = request.headers['x-forwarded-for'] ??
+            request.headers['x-real-ip'] ??
+            _extractClientIp(request);
+        final ua = request.headers['user-agent'] ?? 'Unknown';
+        _clients[ip] = _ClientInfo(
+          ip: ip,
+          userAgent: ua,
+          lastSeen: DateTime.now(),
+        );
+        return innerHandler(request);
+      };
+    };
+  }
+
+  /// 从 shelf context 提取客户端 IP
+  static String _extractClientIp(Request request) {
+    try {
+      final info = request.context['shelf.io.connection_info'];
+      if (info != null) {
+        // ignore: avoid_dynamic_calls
+        return (info as dynamic).remoteAddress?.toString() ?? 'unknown';
+      }
+    } catch (_) {}
+    return 'unknown';
+  }
+
   /// API 鉴权中间件
   ///
   /// 除 `/`（Web 主页）和 `/api/ping`（连通性测试）外，
@@ -181,11 +218,54 @@ class LocalServerService {
     };
   }
 
+  /// 将 Markdown 内容中的绝对图片路径替换为服务器相对路径
+  ///
+  /// 匹配格式：`![](绝对路径)` 或 `<img src="绝对路径">`
+  /// 替换为：`![](/images/文件名)`
+  String _rewriteImagePaths(String content) {
+    if (_imagesDirPath == null) return content;
+    // 匹配 Markdown 图片语法中的绝对路径
+    return content.replaceAllMapped(
+      RegExp(r'!\[([^\]]*)\]\(([^)]+)\)'),
+      (match) {
+        final alt = match.group(1) ?? '';
+        final path = match.group(2) ?? '';
+        // 提取文件名（处理 Windows 和 Unix 路径）
+        final fileName = path.split(RegExp(r'[/\\]')).last;
+        if (fileName.isEmpty) return match.group(0)!;
+        return '![$alt](/images/$fileName)';
+      },
+    );
+  }
+
   /// 注册所有 API 路由
   void _setupRoutes() {
+    // 获取已连接客户端列表
+    _router.get('/api/clients', (Request request) {
+      // 清理超过 30 秒未活动的客户端
+      final now = DateTime.now();
+      _clients.removeWhere(
+        (key, client) => now.difference(client.lastSeen).inSeconds > 30,
+      );
+      final list = _clients.values.map((c) => c.toJson()).toList();
+      return Response.ok(
+        jsonEncode(list),
+        headers: {'Content-Type': 'application/json'},
+      );
+    });
+
     // 测试连通性
     _router.get('/api/ping', (Request request) {
       return Response.ok('Server is running');
+    });
+
+    // 获取所有标签列表
+    _router.get('/api/tags', (Request request) {
+      final tags = ObjectBoxStore.instance.getAllTags();
+      return Response.ok(
+        jsonEncode(tags.map((t) => t.name).toList()),
+        headers: {'Content-Type': 'application/json'},
+      );
     });
 
     // 心跳检测 - 返回设备状态
@@ -232,7 +312,7 @@ class LocalServerService {
       );
     });
 
-    // 提供 Web 前端页面
+    // 提供 Web 前端页面（注入 API Token）
     _router.get('/', (Request request) async {
       final html = await _loadHtml();
       if (html == null) {
@@ -252,16 +332,17 @@ class LocalServerService {
       final list = posts.map((post) {
         return {
           'uuid': post.uuid,
-          'content': post.content,
+          'content': _rewriteImagePaths(post.content),
           'tags': post.tags.map((tag) => tag.name).toList(),
           'createdAt': post.createdAt.millisecondsSinceEpoch > 946684800000
               ? post.createdAt.millisecondsSinceEpoch
               : post.updatedAt.millisecondsSinceEpoch,
           'updatedAt': post.updatedAt.millisecondsSinceEpoch,
           'images': post.images.map((img) {
+            final fileName = img.localPath.split(RegExp(r'[/\\]')).last;
             return {
               'localPath': img.localPath,
-              'url': '/api/assets?path=${Uri.encodeComponent(img.localPath)}',
+              'url': '/images/$fileName',
               'downloadUrl': '/api/images/${img.id}/download',
             };
           }).toList(),
@@ -363,8 +444,9 @@ class LocalServerService {
         // 清理临时文件
         if (tempFile.existsSync()) tempFile.deleteSync();
 
-        // 构建可访问的图片 URL（使用 /api/assets 代理）
-        final imageUrl = '/api/assets?path=${Uri.encodeComponent(savedPath)}';
+        // 构建可访问的图片 URL（使用 /images/ 静态代理）
+        final savedFileName = savedPath.split(RegExp(r'[/\\]')).last;
+        final imageUrl = '/images/$savedFileName';
 
         return Response.ok(
           jsonEncode({
@@ -493,6 +575,35 @@ class LocalServerService {
       );
     });
 
+    // 静态图片代理：/images/<filename> → 应用沙盒 images 目录
+    _router.get('/images/<filename>', (Request request, String filename) async {
+      if (_imagesDirPath == null) {
+        return Response.internalServerError(body: 'Images directory not initialized');
+      }
+      final file = File('$_imagesDirPath/$filename');
+      if (!file.existsSync()) {
+        return Response.notFound('Image not found: $filename');
+      }
+      final ext = filename.split('.').last.toLowerCase();
+      final contentType = switch (ext) {
+        'jpg' || 'jpeg' => 'image/jpeg',
+        'png' => 'image/png',
+        'gif' => 'image/gif',
+        'webp' => 'image/webp',
+        'bmp' => 'image/bmp',
+        _ => 'application/octet-stream',
+      };
+      final bytes = await file.readAsBytes();
+      return Response.ok(
+        bytes,
+        headers: {
+          'Content-Type': contentType,
+          'Content-Length': bytes.length.toString(),
+          'Cache-Control': 'public, max-age=86400',
+        },
+      );
+    });
+
     // 下载图片（Obsidian 插件同步图片用，返回原始文件字节流）
     _router.get('/api/images/<id>/download', (Request request, String id) async {
       final imageId = int.tryParse(id);
@@ -524,13 +635,10 @@ class LocalServerService {
     });
   }
 
-  /// 加载内置 Web 页面，优先使用缓存
+  /// 加载内置 Web 页面
   Future<String?> _loadHtml() async {
-    if (_cachedHtml != null) return _cachedHtml;
-
     try {
-      _cachedHtml = await rootBundle.loadString('assets/web/index.html');
-      return _cachedHtml;
+      return await rootBundle.loadString('assets/web/index.html');
     } catch (e) {
       // ignore: avoid_print
       print('[LocalServer] 加载 index.html 失败: $e');
@@ -554,6 +662,12 @@ class LocalServerService {
       throw StateError('无法加载内置 Web 页面，请确认 assets/web/index.html 已正确打包');
     }
 
+    // 缓存图片目录路径
+    final appDir = await getApplicationDocumentsDirectory();
+    _imagesDirPath = '${appDir.path}/images';
+    // ignore: avoid_print
+    print('[LocalServer] 图片目录: $_imagesDirPath');
+
     // 加载或生成 API Token（持久化）
     if (_persistentToken == null) {
       final prefs = await SharedPreferences.getInstance();
@@ -574,6 +688,7 @@ class LocalServerService {
 
         final handler = Pipeline()
             .addMiddleware(_corsMiddleware)
+            .addMiddleware(_clientTrackingMiddleware())
             .addMiddleware(_authMiddleware())
             .addMiddleware(_loggingMiddleware)
             .addHandler(_router.call);
@@ -708,4 +823,23 @@ class LocalServerService {
     _persistentToken = newToken;
     _apiToken = newToken;
   }
+}
+
+/// 已连接客户端信息
+class _ClientInfo {
+  final String ip;
+  final String userAgent;
+  final DateTime lastSeen;
+
+  _ClientInfo({
+    required this.ip,
+    required this.userAgent,
+    required this.lastSeen,
+  });
+
+  Map<String, dynamic> toJson() => {
+        'ip': ip,
+        'userAgent': userAgent,
+        'lastSeen': lastSeen.millisecondsSinceEpoch,
+      };
 }

@@ -97,7 +97,8 @@
     .preview-content pre code { background: none; padding: 0; }
     .preview-content ul, .preview-content ol { margin: 8px 0; padding-left: 24px; }
     .preview-content li { margin: 4px 0; line-height: 1.7; }
-    .preview-content img { max-width: 100%; border-radius: 8px; margin: 8px 0; }
+    .preview-content img { max-width: 100%; height: auto; border-radius: 8px; margin: 8px 0; }
+    .markdown-body img { max-width: 100%; height: auto; border-radius: 8px; }
     .preview-content a { color: #FF9472; text-decoration: none; }
     .preview-content strong { font-weight: 600; }
     .preview-content hr { border: none; border-top: 1px solid #E5E7EB; margin: 16px 0; }
@@ -194,6 +195,53 @@
       .main-content { margin-left: 0 !important; }
     }
 
+    /* 登录遮罩 */
+    .login-overlay {
+      position: fixed;
+      inset: 0;
+      background: #F9FAFB;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .login-card {
+      background: white;
+      border-radius: 20px;
+      padding: 40px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+      width: 360px;
+      max-width: 90vw;
+    }
+
+    /* 标签下拉 */
+    .tag-dropdown {
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      background: white;
+      border: 1px solid #E5E7EB;
+      border-radius: 8px;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+      max-height: 180px;
+      overflow-y: auto;
+      z-index: 60;
+      display: none;
+    }
+    .tag-dropdown.show { display: block; }
+    .tag-dropdown-item {
+      padding: 6px 12px;
+      font-size: 13px;
+      cursor: pointer;
+      color: #3A3A3A;
+    }
+    .tag-dropdown-item:hover,
+    .tag-dropdown-item.active {
+      background: rgba(255, 148, 114, 0.1);
+      color: #FF9472;
+    }
+
     /* 滚动条美化 */
     ::-webkit-scrollbar { width: 6px; }
     ::-webkit-scrollbar-track { background: transparent; }
@@ -201,6 +249,22 @@
   </style>
 </head>
 <body class="flex h-screen">
+
+  <!-- ========== 登录遮罩 ========== -->
+  <div id="loginOverlay" class="login-overlay">
+    <div class="login-card text-center">
+      <div class="w-14 h-14 rounded-2xl bg-gradient-to-br from-[#FF9472] to-[#FFB194] flex items-center justify-center mx-auto mb-5 shadow-sm">
+        <i class="ph ph-lock-key text-white text-2xl"></i>
+      </div>
+      <h2 class="text-lg font-semibold text-[#3A3A3A] mb-1">连接手机</h2>
+      <p class="text-xs text-gray-400 mb-5">请输入手机端显示的访问密钥</p>
+      <input id="tokenInput" type="text" class="w-full text-center text-sm font-mono tracking-widest border border-gray-200 rounded-xl px-4 py-3 outline-none focus:border-[#FF9472] transition-colors" placeholder="8位密钥" maxlength="8" />
+      <div id="loginError" class="hidden text-xs text-red-400 mt-2">密钥错误，请重新输入</div>
+      <button onclick="doLogin()" id="loginBtn" class="w-full mt-4 bg-[#FF9472] hover:bg-[#FF8058] active:scale-95 text-white text-sm font-medium py-2.5 rounded-xl transition-all duration-200 cursor-pointer shadow-sm">
+        连接
+      </button>
+    </div>
+  </div>
 
   <!-- ========== 左侧边栏 ========== -->
   <aside class="sidebar glass-sidebar w-64 flex-shrink-0 flex flex-col border-r border-gray-100 z-30">
@@ -296,9 +360,10 @@
       </div>
       <div class="flex items-center gap-3">
         <!-- 标签输入 -->
-        <div class="flex items-center gap-2">
+        <div class="relative flex items-center gap-2">
           <i class="ph ph-tag text-gray-400 text-sm"></i>
-          <input id="tagInput" class="text-sm border-none outline-none bg-transparent text-gray-500 placeholder:text-gray-300 w-32" placeholder="标签，回车确认" />
+          <input id="tagInput" class="text-sm border-none outline-none bg-transparent text-gray-500 placeholder:text-gray-300 w-32" placeholder="标签，回车确认" autocomplete="off" />
+          <div id="tagDropdown" class="tag-dropdown"></div>
         </div>
         <div id="tagList" class="flex flex-wrap gap-1 max-w-48"></div>
         <button onclick="closeEditor()" class="text-gray-400 hover:text-gray-600 text-xl leading-none cursor-pointer">
@@ -356,13 +421,25 @@
 
   <script>
     const API_BASE = '';
+    let API_TOKEN = localStorage.getItem('mynotes_token') || '';
+
+    // 通用 fetch 封装，自动携带鉴权头
+    function apiFetch(url, options = {}) {
+      const headers = options.headers || {};
+      if (API_TOKEN) {
+        headers['Authorization'] = 'Bearer ' + API_TOKEN;
+      }
+      return fetch(url, { ...options, headers });
+    }
 
     // ========== 状态管理 ==========
     let allPosts = [];
+    let allTags = []; // 服务器上的所有标签
     let currentFilter = null; // null = 全部，string = 标签名
     let editingPost = null; // null = 新建，object = 编辑
     let currentTags = []; // 当前编辑的标签列表
     let uploadQueue = [];
+    let tagDropdownIndex = -1; // 标签下拉选中索引
 
     // ========== Toast ==========
     let toastTimer = null;
@@ -379,7 +456,7 @@
       const dot = document.getElementById('statusDot');
       const text = document.getElementById('statusText');
       try {
-        const res = await fetch(`${API_BASE}/api/status`);
+        const res = await apiFetch(`${API_BASE}/api/status`);
         if (res.ok) {
           const data = await res.json();
           dot.className = 'status-dot online';
@@ -406,7 +483,7 @@
       grid.classList.add('hidden');
 
       try {
-        const res = await fetch(`${API_BASE}/api/posts`);
+        const res = await apiFetch(`${API_BASE}/api/posts`);
         if (!res.ok) throw new Error('HTTP ' + res.status);
         allPosts = await res.json();
 
@@ -586,18 +663,80 @@
       renderEditorTags();
     }
 
-    // 标签输入
-    document.getElementById('tagInput').addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ',') {
+    // 标签输入 + 自动补全
+    const tagInput = document.getElementById('tagInput');
+    const tagDropdown = document.getElementById('tagDropdown');
+
+    tagInput.addEventListener('input', (e) => {
+      const val = e.target.value.trim();
+      tagDropdownIndex = -1;
+      if (!val) { tagDropdown.classList.remove('show'); return; }
+      const matches = allTags.filter(t => t.includes(val) && !currentTags.includes(t)).slice(0, 8);
+      if (matches.length === 0) { tagDropdown.classList.remove('show'); return; }
+      tagDropdown.innerHTML = matches.map((t, i) =>
+        `<div class="tag-dropdown-item" data-tag="${t}" data-index="${i}">${t}</div>`
+      ).join('');
+      tagDropdown.classList.add('show');
+    });
+
+    tagInput.addEventListener('keydown', (e) => {
+      const items = tagDropdown.querySelectorAll('.tag-dropdown-item');
+      if (e.key === 'ArrowDown') {
         e.preventDefault();
-        const val = e.target.value.trim().replace(/,$/, '');
+        tagDropdownIndex = Math.min(tagDropdownIndex + 1, items.length - 1);
+        updateDropdownHighlight(items);
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        tagDropdownIndex = Math.max(tagDropdownIndex - 1, 0);
+        updateDropdownHighlight(items);
+      } else if (e.key === 'Enter' || e.key === ',') {
+        e.preventDefault();
+        // 优先选中下拉项
+        let val = '';
+        if (tagDropdownIndex >= 0 && items[tagDropdownIndex]) {
+          val = items[tagDropdownIndex].dataset.tag;
+        } else {
+          val = e.target.value.trim().replace(/,$/, '');
+        }
         if (val && !currentTags.includes(val)) {
           currentTags.push(val);
           renderEditorTags();
         }
         e.target.value = '';
+        tagDropdown.classList.remove('show');
+        tagDropdownIndex = -1;
+      } else if (e.key === 'Escape') {
+        tagDropdown.classList.remove('show');
+        tagDropdownIndex = -1;
       }
     });
+
+    tagDropdown.addEventListener('click', (e) => {
+      const item = e.target.closest('.tag-dropdown-item');
+      if (!item) return;
+      const tag = item.dataset.tag;
+      if (tag && !currentTags.includes(tag)) {
+        currentTags.push(tag);
+        renderEditorTags();
+      }
+      tagInput.value = '';
+      tagDropdown.classList.remove('show');
+      tagDropdownIndex = -1;
+      tagInput.focus();
+    });
+
+    // 点击外部关闭下拉
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.relative')) {
+        tagDropdown.classList.remove('show');
+      }
+    });
+
+    function updateDropdownHighlight(items) {
+      items.forEach((el, i) => {
+        el.classList.toggle('active', i === tagDropdownIndex);
+      });
+    }
 
     // 实时预览
     document.getElementById('editorTextarea').addEventListener('input', updatePreview);
@@ -645,7 +784,7 @@
           body.uuid = editingPost.uuid;
         }
 
-        const res = await fetch(`${API_BASE}/api/posts`, {
+        const res = await apiFetch(`${API_BASE}/api/posts`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
@@ -688,7 +827,7 @@
         const formData = new FormData();
         formData.append('file', file);
 
-        const res = await fetch(`${API_BASE}/api/upload`, {
+        const res = await apiFetch(`${API_BASE}/api/upload`, {
           method: 'POST',
           body: formData,
         });
@@ -733,15 +872,72 @@
     document.getElementById('refreshBtn').addEventListener('click', fetchPosts);
     document.getElementById('newPostBtn').addEventListener('click', () => openEditor());
 
+    // token 输入框回车登录
+    document.getElementById('tokenInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') doLogin();
+    });
+
+    // ========== 登录 ==========
+    async function doLogin() {
+      const input = document.getElementById('tokenInput');
+      const errorEl = document.getElementById('loginError');
+      const btn = document.getElementById('loginBtn');
+      const token = input.value.trim();
+      if (!token) return;
+
+      btn.disabled = true;
+      btn.textContent = '验证中...';
+      errorEl.classList.add('hidden');
+
+      try {
+        // 用 token 尝试请求，验证是否有效
+        const tmpToken = API_TOKEN;
+        API_TOKEN = token;
+        const res = await apiFetch(`${API_BASE}/api/posts`);
+        if (!res.ok) throw new Error('Unauthorized');
+        // 验证成功，保存 token
+        localStorage.setItem('mynotes_token', token);
+        API_TOKEN = token;
+        document.getElementById('loginOverlay').style.display = 'none';
+        initApp();
+      } catch {
+        API_TOKEN = '';
+        errorEl.classList.remove('hidden');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '连接';
+      }
+    }
+
+    // ========== 获取所有标签（用于自动补全） ==========
+    async function fetchAllTags() {
+      try {
+        const res = await apiFetch(`${API_BASE}/api/tags`);
+        if (res.ok) allTags = await res.json();
+      } catch {}
+    }
+
     // ========== 初始化 ==========
-    checkStatus();
-    fetchPosts();
+    async function initApp() {
+      await Promise.all([checkStatus(), fetchPosts(), fetchAllTags()]);
+      setInterval(checkStatus, 3000);
+      setInterval(fetchPosts, 30000);
+    }
 
-    // 心跳每 3 秒
-    setInterval(checkStatus, 3000);
-
-    // 每 30 秒刷新列表
-    setInterval(fetchPosts, 30000);
+    // 启动：检查 token 是否有效
+    (async function boot() {
+      if (!API_TOKEN) return; // 无 token，等用户登录
+      try {
+        const res = await apiFetch(`${API_BASE}/api/posts`);
+        if (!res.ok) throw new Error();
+        document.getElementById('loginOverlay').style.display = 'none';
+        initApp();
+      } catch {
+        // token 无效，清除并要求重新登录
+        localStorage.removeItem('mynotes_token');
+        API_TOKEN = '';
+      }
+    })();
   </script>
 </body>
 </html>

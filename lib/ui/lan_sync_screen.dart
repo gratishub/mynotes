@@ -1,3 +1,7 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -18,6 +22,8 @@ class LanSyncScreen extends ConsumerStatefulWidget {
 class _LanSyncScreenState extends ConsumerState<LanSyncScreen>
     with SingleTickerProviderStateMixin {
   late AnimationController _pulseController;
+  List<Map<String, dynamic>> _clients = [];
+  Timer? _clientTimer;
 
   @override
   void initState() {
@@ -26,12 +32,39 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen>
       vsync: this,
       duration: const Duration(milliseconds: 1500),
     );
+    _startClientPolling();
   }
 
   @override
   void dispose() {
     _pulseController.dispose();
+    _clientTimer?.cancel();
     super.dispose();
+  }
+
+  void _startClientPolling() {
+    _clientTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      _fetchClients();
+    });
+  }
+
+  Future<void> _fetchClients() async {
+    final state = ref.read(lanServerProvider);
+    if (!state.isRunning || state.url.isEmpty) {
+      if (_clients.isNotEmpty) setState(() => _clients = []);
+      return;
+    }
+    try {
+      final http = HttpClient()..connectionTimeout = const Duration(seconds: 2);
+      final req = await http.getUrl(Uri.parse('${state.url}/api/clients'));
+      final res = await req.close();
+      final body = await res.transform(utf8.decoder).join();
+      http.close();
+      if (res.statusCode == 200) {
+        final list = (jsonDecode(body) as List).cast<Map<String, dynamic>>();
+        if (mounted) setState(() => _clients = list);
+      }
+    } catch (_) {}
   }
 
   void _toggleServer() async {
@@ -307,6 +340,9 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen>
                   color: Colors.white.withAlpha(100),
                 ),
               ),
+              const SizedBox(height: 24),
+              // ——— 已连接客户端 ———
+              _buildClientsSection(),
             ],
 
             const Spacer(flex: 2),
@@ -344,5 +380,115 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen>
         ),
       ),
     );
+  }
+
+  Widget _buildClientsSection() {
+    final count = _clients.length;
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 32),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      decoration: BoxDecoration(
+        color: Colors.white.withAlpha(15),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.white.withAlpha(25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.devices_rounded,
+                  size: 18, color: const Color(0xFF00D2FF)),
+              const SizedBox(width: 12),
+              Text(
+                '已连接 $count 台设备',
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.white,
+                ),
+              ),
+            ],
+          ),
+          if (_clients.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            ..._clients.map((c) {
+              final ip = c['ip'] ?? '未知';
+              final ua = _parseUserAgent(c['userAgent'] ?? '');
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 6,
+                      height: 6,
+                      decoration: const BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Color(0xFF22C55E),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            ip,
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.white.withAlpha(200),
+                              fontFamily: 'monospace',
+                            ),
+                          ),
+                          Text(
+                            ua,
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.white.withAlpha(100),
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// 从 User-Agent 提取浏览器和系统信息
+  String _parseUserAgent(String ua) {
+    if (ua.isEmpty || ua == 'Unknown') return '未知客户端';
+    // 提取浏览器
+    String browser = 'Unknown';
+    if (ua.contains('Edg/')) {
+      browser = 'Edge';
+    } else if (ua.contains('Chrome/') && !ua.contains('Chromium')) {
+      browser = 'Chrome';
+    } else if (ua.contains('Firefox/')) {
+      browser = 'Firefox';
+    } else if (ua.contains('Safari/') && !ua.contains('Chrome')) {
+      browser = 'Safari';
+    }
+    // 提取系统
+    String os = '';
+    if (ua.contains('Windows')) {
+      os = 'Windows';
+    } else if (ua.contains('Mac OS')) {
+      os = 'macOS';
+    } else if (ua.contains('Linux')) {
+      os = 'Linux';
+    } else if (ua.contains('Android')) {
+      os = 'Android';
+    } else if (ua.contains('iPhone') || ua.contains('iPad')) {
+      os = 'iOS';
+    }
+    return os.isNotEmpty ? '$browser · $os' : browser;
   }
 }
