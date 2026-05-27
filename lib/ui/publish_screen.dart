@@ -9,6 +9,7 @@ import 'package:uuid/uuid.dart';
 
 import '../models/post.dart';
 import '../models/image_meta.dart';
+import '../models/tag.dart';
 import '../services/image_processor.dart';
 import '../providers.dart';
 
@@ -31,6 +32,7 @@ class _PublishScreenState extends ConsumerState<PublishScreen> {
   final List<XFile> _selectedImages = [];
   final List<String> _existingImagePaths = [];
   final List<String> _deletedImagePaths = [];
+  final List<String> _selectedTags = [];
   bool _isPublishing = false;
   bool _isPreview = false;
 
@@ -47,6 +49,7 @@ class _PublishScreenState extends ConsumerState<PublishScreen> {
       _contentController.text = widget.post!.content;
       _existingImagePaths
           .addAll(widget.post!.images.map((img) => img.localPath));
+      _selectedTags.addAll(widget.post!.tags.map((t) => t.name));
     }
     _focusNode.requestFocus();
   }
@@ -227,6 +230,18 @@ class _PublishScreenState extends ConsumerState<PublishScreen> {
         }
       }
 
+      // 处理标签
+      savedPost.tags.clear();
+      for (final tagName in _selectedTags) {
+        var tag = store.getTagByName(tagName);
+        if (tag == null) {
+          tag = Tag(name: tagName);
+          store.putTag(tag);
+        }
+        savedPost.tags.add(tag);
+      }
+      store.putPost(savedPost);
+
       // 保存成功后强制刷新主页的日记列表
       // activePostsProvider 是 StreamProvider，invalidate 会让它重新从 Stream 读取最新数据
       ref.invalidate(activePostsProvider);
@@ -236,6 +251,7 @@ class _PublishScreenState extends ConsumerState<PublishScreen> {
         _selectedImages.clear();
         _existingImagePaths.clear();
         _deletedImagePaths.clear();
+        _selectedTags.clear();
         _isPublishing = false;
       });
 
@@ -255,6 +271,183 @@ class _PublishScreenState extends ConsumerState<PublishScreen> {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
     }
+  }
+
+  // ============================================================
+  // 标签选择面板
+  // ============================================================
+
+  Future<void> _showTagPicker() async {
+    final store = ref.read(objectBoxProvider);
+    final allTags = store.getAllTags();
+
+    if (!mounted) return;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setSheetState) {
+          return Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+            ),
+            padding: EdgeInsets.only(
+              left: 20,
+              right: 20,
+              top: 16,
+              bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 36,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  '选择标签',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF3A3A3A),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                // 输入新标签
+                StatefulBuilder(
+                  builder: (context, setInputState) {
+                    final controller = TextEditingController();
+                    return Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: controller,
+                            decoration: InputDecoration(
+                              hintText: '添加新标签',
+                              hintStyle: TextStyle(
+                                color: Colors.grey.shade400,
+                                fontSize: 14,
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 10,
+                              ),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide(color: Colors.grey.shade200),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide(color: Colors.grey.shade200),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide(color: Theme.of(context).colorScheme.primary),
+                              ),
+                              isDense: true,
+                            ),
+                            onSubmitted: (value) {
+                              final tag = value.trim();
+                              if (tag.isNotEmpty && !_selectedTags.contains(tag)) {
+                                setState(() => _selectedTags.add(tag));
+                                setSheetState(() {});
+                              }
+                              controller.clear();
+                              setInputState(() {});
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          icon: Icon(Icons.add_circle, color: Theme.of(context).colorScheme.primary),
+                          onPressed: () {
+                            final tag = controller.text.trim();
+                            if (tag.isNotEmpty && !_selectedTags.contains(tag)) {
+                              setState(() => _selectedTags.add(tag));
+                              setSheetState(() {});
+                            }
+                            controller.clear();
+                            setInputState(() {});
+                          },
+                        ),
+                      ],
+                    );
+                  },
+                ),
+                const SizedBox(height: 12),
+                // 已选标签提示
+                if (_selectedTags.isNotEmpty) ...[
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: _selectedTags.map((t) => Chip(
+                      label: Text(t, style: const TextStyle(fontSize: 12)),
+                      backgroundColor: Theme.of(context).colorScheme.primary.withAlpha(25),
+                      labelStyle: TextStyle(color: Theme.of(context).colorScheme.primary),
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                    )).toList(),
+                  ),
+                  const SizedBox(height: 10),
+                ],
+                // 已有标签列表
+                if (allTags.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 20),
+                    child: Center(
+                      child: Text(
+                        '暂无标签',
+                        style: TextStyle(color: Colors.grey, fontSize: 14),
+                      ),
+                    ),
+                  )
+                else
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: allTags.map((tag) {
+                      final isSelected = _selectedTags.contains(tag.name);
+                      return FilterChip(
+                        label: Text(tag.name),
+                        selected: isSelected,
+                        onSelected: (selected) {
+                          setState(() {
+                            if (selected) {
+                              _selectedTags.add(tag.name);
+                            } else {
+                              _selectedTags.remove(tag.name);
+                            }
+                          });
+                          setSheetState(() {});
+                        },
+                        selectedColor: Theme.of(context).colorScheme.primary.withAlpha(35),
+                        checkmarkColor: Theme.of(context).colorScheme.primary,
+                        labelStyle: TextStyle(
+                          color: isSelected
+                              ? Theme.of(context).colorScheme.primary
+                              : const Color(0xFF555555),
+                          fontSize: 13,
+                        ),
+                      );
+                    }).toList(),
+                  ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
   }
 
   // ============================================================
@@ -389,33 +582,80 @@ class _PublishScreenState extends ConsumerState<PublishScreen> {
   Widget _buildEditBody(ThemeData theme) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
-      child: TextField(
-        controller: _contentController,
-        focusNode: _focusNode,
-        maxLines: null,
-        expands: true,
-        textAlignVertical: TextAlignVertical.top,
-        cursorWidth: 2,
-        cursorColor: theme.colorScheme.primary,
-        decoration: InputDecoration(
-          hintText: '此刻的想法或发生的故事...',
-          hintStyle: TextStyle(
-            color: theme.colorScheme.onSurface.withAlpha(35),
-            fontSize: 16,
-            fontWeight: FontWeight.w400,
-            height: 1.7,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 已选标签展示
+          if (_selectedTags.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: _selectedTags.map((tag) => GestureDetector(
+                onTap: () {
+                  setState(() => _selectedTags.remove(tag));
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.primary.withAlpha(20),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        tag,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: theme.colorScheme.primary,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Icon(
+                        Icons.close,
+                        size: 14,
+                        color: theme.colorScheme.primary.withAlpha(150),
+                      ),
+                    ],
+                  ),
+                ),
+              )).toList(),
+            ),
+            const SizedBox(height: 4),
+          ],
+          // 文本输入框
+          Expanded(
+            child: TextField(
+              controller: _contentController,
+              focusNode: _focusNode,
+              maxLines: null,
+              expands: true,
+              textAlignVertical: TextAlignVertical.top,
+              cursorWidth: 2,
+              cursorColor: theme.colorScheme.primary,
+              decoration: InputDecoration(
+                hintText: '此刻的想法或发生的故事...',
+                hintStyle: TextStyle(
+                  color: theme.colorScheme.onSurface.withAlpha(35),
+                  fontSize: 16,
+                  fontWeight: FontWeight.w400,
+                  height: 1.7,
+                ),
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                isDense: true,
+              ),
+              style: theme.textTheme.bodyLarge?.copyWith(
+                height: 1.7,
+                color: const Color(0xFF3A3A3A),
+                fontSize: 16,
+              ),
+            ),
           ),
-          border: InputBorder.none,
-          enabledBorder: InputBorder.none,
-          focusedBorder: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(vertical: 12),
-          isDense: true,
-        ),
-        style: theme.textTheme.bodyLarge?.copyWith(
-          height: 1.7,
-          color: const Color(0xFF3A3A3A),
-          fontSize: 16,
-        ),
+        ],
       ),
     );
   }
@@ -438,6 +678,29 @@ class _PublishScreenState extends ConsumerState<PublishScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // 已选标签展示
+          if (_selectedTags.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: _selectedTags.map((tag) => Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.primary.withAlpha(20),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  tag,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: theme.colorScheme.primary,
+                  ),
+                ),
+              )).toList(),
+            ),
+            const SizedBox(height: 8),
+          ],
           if (hasContent)
             MarkdownBody(
               data: content,
@@ -779,9 +1042,12 @@ class _PublishScreenState extends ConsumerState<PublishScreen> {
                 _pillIcon(Icons.image_outlined, '添加图片', _pickImages),
                 const Spacer(),
                 // # 标签
-                _pillIcon(Icons.local_offer_outlined, '标签功能开发中...', () {
-                  _showInfo('标签功能开发中...');
-                }),
+                _pillIcon(
+                  Icons.local_offer_outlined,
+                  '选择标签',
+                  _showTagPicker,
+                  isActive: _selectedTags.isNotEmpty,
+                ),
                 const Spacer(),
                 // ➕ 更多
                 Container(
