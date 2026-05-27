@@ -35,6 +35,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   bool _isFeedView = true;
   bool _isCalendarExpanded = false;
   DateTime? _selectedDate;
+  String? _selectedTagFilter;
   late DateTime _calendarMonth;
   Set<int> _datesWithPosts = {};
   static const _weekDays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
@@ -68,12 +69,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 Expanded(
                   child: postsAsync.when(
                     data: (allPosts) {
-                      final posts = _selectedDate != null
-                          ? allPosts.where((p) =>
-                              p.updatedAt.year == _selectedDate!.year &&
-                              p.updatedAt.month == _selectedDate!.month &&
-                              p.updatedAt.day == _selectedDate!.day).toList()
-                          : allPosts;
+                      final posts = _filterPosts(allPosts);
 
                       return AnimatedSwitcher(
                         duration: const Duration(milliseconds: 300),
@@ -113,6 +109,28 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
+  /// 根据当前筛选条件过滤日记
+  List<Post> _filterPosts(List<Post> allPosts) {
+    var result = allPosts;
+
+    // 日期筛选
+    if (_selectedDate != null) {
+      result = result.where((p) =>
+          p.updatedAt.year == _selectedDate!.year &&
+          p.updatedAt.month == _selectedDate!.month &&
+          p.updatedAt.day == _selectedDate!.day).toList();
+    }
+
+    // 标签筛选
+    if (_selectedTagFilter != null) {
+      result = result
+          .where((p) => p.tags.any((t) => t.name == _selectedTagFilter))
+          .toList();
+    }
+
+    return result;
+  }
+
   // ============================================================
   // 头部 — 日期 + 天气占位 + 视图切换
   // ============================================================
@@ -144,13 +162,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
           ),
           const Spacer(),
-          if (_selectedDate != null)
+          if (_selectedDate != null || _selectedTagFilter != null)
             Padding(
               padding: const EdgeInsets.only(right: 4),
               child: GestureDetector(
                 onTap: _onClearFilter,
                 child: Text(
-                  '清除筛选',
+                  _selectedTagFilter != null ? '清除标签筛选' : '清除筛选',
                   style: TextStyle(
                     fontSize: 13,
                     color: Theme.of(context).colorScheme.primary,
@@ -462,6 +480,57 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               _buildCardImages(post.images.toList()),
             ],
 
+            // ——— 标签区域 ———
+            if (post.tags.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              SizedBox(
+                height: 26,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: post.tags.length > 3 ? 4 : post.tags.length,
+                  separatorBuilder: (context, a) => const SizedBox(width: 6),
+                  itemBuilder: (context, index) {
+                    if (index == 3) {
+                      return Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFF9472).withAlpha(20),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          '+${post.tags.length - 3}',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: Color(0xFFFF9472),
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      );
+                    }
+                    final tag = post.tags.toList()[index];
+                    return GestureDetector(
+                      onTap: () => _toggleTagFilter(tag.name),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFF9472).withAlpha(20),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          tag.name,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: Color(0xFFFF9472),
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+
             const SizedBox(height: 14),
 
             // ——— 底部信息：字数 / 评论 ———
@@ -712,6 +781,19 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   void _onClearFilter() {
     setState(() {
       _selectedDate = null;
+      _selectedTagFilter = null;
+    });
+  }
+
+  /// 切换标签筛选
+  void _toggleTagFilter(String tagName) {
+    setState(() {
+      if (_selectedTagFilter == tagName) {
+        _selectedTagFilter = null; // 再次点击取消筛选
+      } else {
+        _selectedTagFilter = tagName;
+        _selectedDate = null; // 切换到标签筛选时清除日期筛选
+      }
     });
   }
 
