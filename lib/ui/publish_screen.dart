@@ -70,7 +70,6 @@ class _PublishScreenState extends ConsumerState<PublishScreen> {
       final picker = ImagePicker();
       final images = await picker.pickMultiImage(
         imageQuality: 100,
-        maxWidth: 400,
       );
       if (images.isNotEmpty) {
         setState(() => _selectedImages.addAll(images));
@@ -902,36 +901,7 @@ class _PublishScreenState extends ConsumerState<PublishScreen> {
   void _openFullScreenImage(String path) {
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => Scaffold(
-          backgroundColor: Colors.black,
-          appBar: AppBar(
-            backgroundColor: Colors.black,
-            foregroundColor: Colors.white,
-            elevation: 0,
-            leading: IconButton(
-              icon: const Icon(Icons.close_rounded),
-              onPressed: () => Navigator.of(context).pop(),
-            ),
-          ),
-          body: Center(
-            child: InteractiveViewer(
-              maxScale: 5,
-              child: Image.file(
-                File(path),
-                fit: BoxFit.contain,
-                errorBuilder: (context, error, stackTrace) {
-                  return const Center(
-                    child: Icon(
-                      Icons.broken_image,
-                      size: 48,
-                      color: Colors.white54,
-                    ),
-                  );
-                },
-              ),
-            ),
-          ),
-        ),
+        builder: (_) => _FullScreenImageViewer(imagePath: path),
       ),
     );
   }
@@ -1110,5 +1080,77 @@ class _PublishScreenState extends ConsumerState<PublishScreen> {
         ),
       );
     }
+  }
+}
+
+/// 全屏图片查看器 — 支持双击缩放
+class _FullScreenImageViewer extends StatefulWidget {
+  final String imagePath;
+
+  const _FullScreenImageViewer({required this.imagePath});
+
+  @override
+  State<_FullScreenImageViewer> createState() => _FullScreenImageViewerState();
+}
+
+class _FullScreenImageViewerState extends State<_FullScreenImageViewer> {
+  final TransformationController _transformationController =
+      TransformationController();
+  TapDownDetails? _doubleTapDetails;
+
+  @override
+  void dispose() {
+    _transformationController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.close_rounded),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+      ),
+      body: GestureDetector(
+        onDoubleTapDown: (d) => _doubleTapDetails = d,
+        onDoubleTap: () {
+          if (_transformationController.value != Matrix4.identity()) {
+            _transformationController.value = Matrix4.identity();
+          } else {
+            final pos = _doubleTapDetails!.localPosition;
+            _transformationController.value = Matrix4.identity()
+              ..translate(-pos.dx * 2, -pos.dy * 2)
+              ..scale(3.0);
+          }
+        },
+        child: InteractiveViewer(
+          transformationController: _transformationController,
+          maxScale: 5.0,
+          minScale: 0.8,
+          clipBehavior: Clip.none,
+          child: Center(
+            child: Image.file(
+              File(widget.imagePath),
+              fit: BoxFit.contain,
+              errorBuilder: (context, error, stackTrace) {
+                return const Center(
+                  child: Icon(
+                    Icons.broken_image,
+                    size: 48,
+                    color: Colors.white54,
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
