@@ -116,36 +116,36 @@
     }
 
     /* 日期筛选 */
-    .date-filter-btn {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      padding: 6px 12px;
-      border-radius: 8px;
+    .quick-date-btn {
+      padding: 4px 10px;
+      border-radius: 6px;
       font-size: 12px;
       cursor: pointer;
-      transition: all 0.2s;
+      border: 1px solid #E5E7EB;
+      background: white;
+      color: #6B7280;
+      transition: all 0.15s;
     }
-    .date-filter-btn.active {
-      background: rgba(255, 148, 114, 0.15);
+    .quick-date-btn:hover {
+      border-color: #FF9472;
       color: #FF9472;
     }
-    .date-filter-btn:not(.active) {
-      color: #9CA3AF;
+    .quick-date-btn.active {
+      background: #FF9472;
+      border-color: #FF9472;
+      color: white;
     }
-    .date-filter-btn:hover {
-      background: rgba(255, 148, 114, 0.1);
-    }
-    input[type="date"] {
+    .date-input {
       border: 1px solid #E5E7EB;
-      border-radius: 8px;
-      padding: 4px 8px;
-      font-size: 12px;
+      border-radius: 6px;
+      padding: 4px 6px;
+      font-size: 11px;
       color: #3A3A3A;
       outline: none;
       font-family: 'Noto Sans SC', sans-serif;
+      background: white;
     }
-    input[type="date"]:focus {
+    .date-input:focus {
       border-color: #FF9472;
     }
 
@@ -343,19 +343,25 @@
 
       <!-- 日期筛选 -->
       <div class="mt-4 px-2">
-        <div class="text-xs font-medium text-gray-400 uppercase tracking-wider py-2">日期筛选</div>
-        <div class="flex flex-col gap-2 mt-1">
-          <div class="flex items-center gap-2">
-            <span class="text-xs text-gray-400 w-8">从</span>
-            <input type="date" id="dateStart" class="flex-1" onchange="onDateFilterChange()" />
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="text-xs text-gray-400 w-8">至</span>
-            <input type="date" id="dateEnd" class="flex-1" onchange="onDateFilterChange()" />
-          </div>
-          <button id="clearDateBtn" onclick="clearDateFilter()"
-                  class="hidden text-xs text-[#FF9472] hover:underline cursor-pointer text-left">
-            清除日期筛选
+        <div class="text-xs font-medium text-gray-400 uppercase tracking-wider py-2">按日期</div>
+        <!-- 快捷按钮 -->
+        <div class="flex flex-wrap gap-1.5 mt-1">
+          <button onclick="setQuickDate('today')" class="quick-date-btn">今天</button>
+          <button onclick="setQuickDate('week')" class="quick-date-btn">本周</button>
+          <button onclick="setQuickDate('month')" class="quick-date-btn">本月</button>
+          <button onclick="setQuickDate('year')" class="quick-date-btn">今年</button>
+        </div>
+        <!-- 自定义范围 -->
+        <div class="mt-3 flex items-center gap-1.5">
+          <input type="date" id="dateStart" class="date-input flex-1" onchange="onDateFilterChange()" />
+          <span class="text-gray-300 text-xs">~</span>
+          <input type="date" id="dateEnd" class="date-input flex-1" onchange="onDateFilterChange()" />
+        </div>
+        <!-- 当前筛选状态 -->
+        <div id="dateFilterStatus" class="hidden mt-2 flex items-center justify-between">
+          <span id="dateFilterLabel" class="text-xs text-[#FF9472]"></span>
+          <button onclick="clearDateFilter()" class="text-xs text-gray-400 hover:text-[#FF9472] cursor-pointer">
+            <i class="ph ph-x"></i>
           </button>
         </div>
       </div>
@@ -615,18 +621,55 @@
     }
 
     // ========== 日期筛选 ==========
+    let activeQuickDate = null;
+
+    function setQuickDate(type) {
+      // 取消已选
+      if (activeQuickDate === type) {
+        clearDateFilter();
+        return;
+      }
+      const now = new Date();
+      const fmt = d => d.toISOString().slice(0, 10);
+      switch (type) {
+        case 'today':
+          dateStart = fmt(now);
+          dateEnd = fmt(now);
+          break;
+        case 'week': {
+          const day = now.getDay() || 7;
+          const mon = new Date(now);
+          mon.setDate(now.getDate() - day + 1);
+          dateStart = fmt(mon);
+          dateEnd = fmt(now);
+          break;
+        }
+        case 'month':
+          dateStart = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+          dateEnd = fmt(now);
+          break;
+        case 'year':
+          dateStart = `${now.getFullYear()}-01-01`;
+          dateEnd = fmt(now);
+          break;
+      }
+      activeQuickDate = type;
+      document.getElementById('dateStart').value = dateStart;
+      document.getElementById('dateEnd').value = dateEnd;
+      updateQuickDateBtns();
+      updateDateFilterLabel();
+      fetchPosts();
+    }
+
     function onDateFilterChange() {
       dateStart = document.getElementById('dateStart').value;
       dateEnd = document.getElementById('dateEnd').value;
-      const clearBtn = document.getElementById('clearDateBtn');
+      activeQuickDate = null;
+      updateQuickDateBtns();
       if (dateStart || dateEnd) {
-        clearBtn.classList.remove('hidden');
-        const label = dateStart && dateEnd
-          ? `${dateStart} ~ ${dateEnd}`
-          : dateStart ? `${dateStart} 起` : `至 ${dateEnd}`;
-        document.getElementById('feedTitle').textContent = label;
+        updateDateFilterLabel();
       } else {
-        clearBtn.classList.add('hidden');
+        document.getElementById('dateFilterStatus').classList.add('hidden');
         if (!currentFilter) {
           document.getElementById('feedTitle').textContent = '全部日记';
         }
@@ -637,13 +680,38 @@
     function clearDateFilter() {
       dateStart = '';
       dateEnd = '';
+      activeQuickDate = null;
       document.getElementById('dateStart').value = '';
       document.getElementById('dateEnd').value = '';
-      document.getElementById('clearDateBtn').classList.add('hidden');
+      document.getElementById('dateFilterStatus').classList.add('hidden');
+      updateQuickDateBtns();
       if (!currentFilter) {
         document.getElementById('feedTitle').textContent = '全部日记';
       }
       fetchPosts();
+    }
+
+    function updateQuickDateBtns() {
+      document.querySelectorAll('.quick-date-btn').forEach(btn => {
+        const type = btn.getAttribute('onclick')?.match(/'(\w+)'/)?.[1];
+        btn.classList.toggle('active', type === activeQuickDate);
+      });
+    }
+
+    function updateDateFilterLabel() {
+      const status = document.getElementById('dateFilterStatus');
+      const label = document.getElementById('dateFilterLabel');
+      status.classList.remove('hidden');
+      if (dateStart && dateEnd && dateStart === dateEnd) {
+        label.textContent = dateStart;
+      } else if (dateStart && dateEnd) {
+        label.textContent = `${dateStart} ~ ${dateEnd}`;
+      } else if (dateStart) {
+        label.textContent = `${dateStart} 起`;
+      } else {
+        label.textContent = `至 ${dateEnd}`;
+      }
+      document.getElementById('feedTitle').textContent = label.textContent;
     }
 
     // ========== 渲染日记卡片 ==========

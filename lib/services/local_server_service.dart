@@ -151,16 +151,17 @@ class LocalServerService {
   /// 客户端追踪中间件
   ///
   /// 记录每个请求的 IP、User-Agent 和最后活跃时间。
-  /// 超过 30 秒未请求的客户端会被自动清理。
+  /// 超过 60 秒未请求的客户端会被自动清理。
   Middleware _clientTrackingMiddleware() {
     return (Handler innerHandler) {
       return (Request request) async {
-        final ip = request.headers['x-forwarded-for'] ??
-            request.headers['x-real-ip'] ??
-            _extractClientIp(request);
         final ua = request.headers['user-agent'] ?? 'Unknown';
-        // 忽略本机请求（心跳检测等）
-        if (ip != '127.0.0.1' && ip != '::1' && ip != 'unknown') {
+        final ip = _extractClientIp(request);
+        // ignore: avoid_print
+        print('[LocalServer] Client: ip=$ip ua=${ua.substring(0, ua.length.clamp(0, 50))}');
+
+        // 过滤本机请求
+        if (ip != '127.0.0.1' && ip != '::1') {
           final key = '$ip|$ua';
           _clients[key] = _ClientInfo(
             ip: ip,
@@ -173,15 +174,24 @@ class LocalServerService {
     };
   }
 
-  /// 从 shelf context 提取客户端 IP
+  /// 提取客户端 IP（多重降级策略）
   static String _extractClientIp(Request request) {
+    // 1. 代理头
+    final forwarded = request.headers['x-forwarded-for'];
+    if (forwarded != null && forwarded.isNotEmpty) return forwarded.split(',').first.trim();
+    final realIp = request.headers['x-real-ip'];
+    if (realIp != null && realIp.isNotEmpty) return realIp;
+    // 2. shelf 连接信息
     try {
       final info = request.context['shelf.io.connection_info'];
-      if (info is HttpConnectionInfo) {
-        return info.remoteAddress.address;
+      if (info != null) {
+        final addr = (info as dynamic).remoteAddress;
+        if (addr != null) return addr.toString();
       }
     } catch (_) {}
-    return 'unknown';
+    // 3. 降级：用 User-Agent 哈希作为伪标识
+    final ua = request.headers['user-agent'] ?? '';
+    return 'client-${ua.hashCode.toRadixString(16)}';
   }
 
   /// API 鉴权中间件
@@ -245,10 +255,10 @@ class LocalServerService {
   void _setupRoutes() {
     // 获取已连接客户端列表
     _router.get('/api/clients', (Request request) {
-      // 清理超过 30 秒未活动的客户端
+      // 清理超过 60 秒未活动的客户端
       final now = DateTime.now();
       _clients.removeWhere(
-        (key, client) => now.difference(client.lastSeen).inSeconds > 30,
+        (key, client) => now.difference(client.lastSeen).inSeconds > 60,
       );
       final list = _clients.values.map((c) => c.toJson()).toList();
       return Response.ok(
