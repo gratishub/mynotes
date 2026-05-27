@@ -3,116 +3,369 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>我的日记</title>
+  <title>我的日记 — 局域网同步</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@phosphor-icons/web@2.1.1/src/regular/style.css" />
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&display=swap');
-    body { font-family: 'Noto Sans SC', sans-serif; }
-    .post-card { transition: transform 0.2s ease, box-shadow 0.2s ease; }
-    .post-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.1); }
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700&display=swap');
 
-    /* 发布框 textarea */
-    .publisher-textarea {
-      resize: vertical;
-      min-height: 96px;
+    * { box-sizing: border-box; }
+
+    body {
+      font-family: 'Noto Sans SC', sans-serif;
+      background: #F9FAFB;
+      overflow: hidden;
+      height: 100vh;
+    }
+
+    /* 侧边栏毛玻璃 */
+    .glass-sidebar {
+      background: rgba(255, 255, 255, 0.85);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+    }
+
+    /* 状态指示器 */
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+    .status-dot.online { background: #22C55E; box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.2); }
+    .status-dot.offline { background: #EF4444; box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.2); }
+
+    /* 卡片悬浮效果 */
+    .post-card {
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+      cursor: pointer;
+    }
+    .post-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.1);
+    }
+
+    /* 编辑器区域 */
+    .editor-split {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      height: 100%;
+    }
+    .editor-textarea {
+      resize: none;
       outline: none;
-      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+      border: none;
+      padding: 24px;
+      font-family: 'Noto Sans SC', sans-serif;
+      font-size: 15px;
+      line-height: 1.8;
+      background: white;
     }
-    .publisher-textarea:focus {
-      border-color: #FF9472;
-      box-shadow: 0 0 0 3px rgba(255, 148, 114, 0.15);
+    .editor-preview {
+      padding: 24px;
+      overflow-y: auto;
+      background: #FAFAFA;
+      border-left: 1px solid #F0F0F0;
     }
 
-    /* Toast 提示 */
+    /* 预览区 markdown 样式 */
+    .preview-content h1 { font-size: 1.5rem; font-weight: 700; margin: 16px 0 8px; color: #2A2A2A; }
+    .preview-content h2 { font-size: 1.25rem; font-weight: 600; margin: 14px 0 6px; color: #2A2A2A; }
+    .preview-content h3 { font-size: 1.1rem; font-weight: 600; margin: 12px 0 4px; color: #2A2A2A; }
+    .preview-content p { margin: 8px 0; line-height: 1.8; color: #3A3A3A; }
+    .preview-content blockquote {
+      border-left: 3px solid #FF9472;
+      padding-left: 12px;
+      color: #888;
+      font-style: italic;
+      margin: 12px 0;
+    }
+    .preview-content code {
+      background: #F3F4F6;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: 13px;
+    }
+    .preview-content pre {
+      background: #F3F4F6;
+      padding: 16px;
+      border-radius: 8px;
+      overflow-x: auto;
+    }
+    .preview-content pre code { background: none; padding: 0; }
+    .preview-content ul, .preview-content ol { margin: 8px 0; padding-left: 24px; }
+    .preview-content li { margin: 4px 0; line-height: 1.7; }
+    .preview-content img { max-width: 100%; border-radius: 8px; margin: 8px 0; }
+    .preview-content a { color: #FF9472; text-decoration: none; }
+    .preview-content strong { font-weight: 600; }
+    .preview-content hr { border: none; border-top: 1px solid #E5E7EB; margin: 16px 0; }
+
+    /* 标签 Chip */
+    .tag-chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 10px;
+      background: rgba(255, 148, 114, 0.15);
+      color: #FF9472;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 500;
+    }
+
+    /* 抽屉动画 */
+    .drawer-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.4);
+      backdrop-filter: blur(4px);
+      z-index: 40;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+    }
+    .drawer-overlay.active { opacity: 1; pointer-events: all; }
+
+    .drawer-panel {
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: 90vw;
+      max-width: 900px;
+      background: white;
+      z-index: 50;
+      transform: translateX(100%);
+      transition: transform 0.35s cubic-bezier(0.32, 0.72, 0, 1);
+      display: flex;
+      flex-direction: column;
+      box-shadow: -8px 0 32px rgba(0, 0, 0, 0.12);
+    }
+    .drawer-panel.active { transform: translateX(0); }
+
+    /* 拖放区域 */
+    .drop-zone {
+      border: 2px dashed transparent;
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .drop-zone.dragover {
+      border-color: #FF9472;
+      background: rgba(255, 148, 114, 0.05);
+    }
+
+    /* Toast */
     .toast {
       position: fixed;
       bottom: 32px;
       left: 50%;
       transform: translateX(-50%) translateY(80px);
       padding: 10px 24px;
-      background: #3A3A3A;
+      background: #2A2A2A;
       color: #fff;
-      border-radius: 24px;
+      border-radius: 20px;
       font-size: 14px;
       opacity: 0;
       transition: opacity 0.3s ease, transform 0.3s ease;
       pointer-events: none;
-      z-index: 100;
+      z-index: 200;
       white-space: nowrap;
     }
-    .toast.show {
-      opacity: 1;
-      transform: translateX(-50%) translateY(0);
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+    /* 图片预览网格 */
+    .image-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 4px;
+      margin-top: 12px;
     }
+    .image-grid img {
+      width: 100%;
+      height: 80px;
+      object-fit: cover;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    /* 响应式：小窗口隐藏侧边栏 */
+    @media (max-width: 768px) {
+      .sidebar { display: none; }
+      .main-content { margin-left: 0 !important; }
+    }
+
+    /* 滚动条美化 */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #D1D5DB; border-radius: 3px; }
   </style>
 </head>
-<body class="bg-[#F8F7F4] min-h-screen">
-  <!-- 顶栏 -->
-  <header class="sticky top-0 z-10 bg-white/70 backdrop-blur-md border-b border-gray-100">
-    <div class="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
-      <h1 class="text-lg font-medium text-[#3A3A3A] tracking-wide">📖 我的日记</h1>
-      <button id="refreshBtn" class="text-sm text-gray-400 hover:text-[#FF9472] transition-colors cursor-pointer">
-        ↻ 刷新
+<body class="flex h-screen">
+
+  <!-- ========== 左侧边栏 ========== -->
+  <aside class="sidebar glass-sidebar w-64 flex-shrink-0 flex flex-col border-r border-gray-100 z-30">
+    <!-- Logo 区 -->
+    <div class="px-5 py-5 border-b border-gray-100">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-[#FF9472] to-[#FFB194] flex items-center justify-center shadow-sm">
+          <i class="ph ph-book-open-text text-white text-lg"></i>
+        </div>
+        <div>
+          <div class="text-sm font-semibold text-[#3A3A3A]">我的日记</div>
+          <div class="text-xs text-gray-400">局域网同步</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 状态指示器 -->
+    <div class="px-5 py-4 border-b border-gray-100">
+      <div class="flex items-center gap-2">
+        <span id="statusDot" class="status-dot offline"></span>
+        <span id="statusText" class="text-xs text-gray-500">检测中...</span>
+      </div>
+      <div id="ipDisplay" class="mt-2 text-xs text-gray-400 font-mono"></div>
+    </div>
+
+    <!-- 写日记按钮 -->
+    <div class="px-5 py-4">
+      <button id="newPostBtn" onclick="openEditor()" class="w-full flex items-center justify-center gap-2 bg-[#FF9472] hover:bg-[#FF8058] active:scale-95 text-white text-sm font-medium py-2.5 px-4 rounded-xl transition-all duration-200 shadow-sm cursor-pointer">
+        <i class="ph ph-pencil-simple"></i>
+        写新日记
       </button>
     </div>
-  </header>
 
-  <main class="max-w-6xl mx-auto px-4 py-6">
-    <!-- 发布模块 -->
-    <div class="bg-white rounded-2xl border border-gray-100 p-5 mb-6 shadow-sm">
-      <label for="publisherInput" class="text-sm font-medium text-[#3A3A3A] mb-3 block">
-        写一篇新日记
-      </label>
-      <textarea id="publisherInput" class="publisher-textarea w-full text-sm text-[#3A3A3A] leading-relaxed border border-gray-200 rounded-xl px-4 py-3 bg-[#FAFAF8] placeholder:text-gray-300" placeholder="此刻的想法或发生的故事...（支持 Markdown）"></textarea>
-      <div class="flex justify-end mt-3">
-        <button id="publishBtn" class="bg-[#FF9472] hover:bg-[#FF8058] active:scale-95 text-white text-sm font-medium px-6 py-2 rounded-xl transition-all duration-200 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
-          发布到手机
+    <!-- 导航列表 -->
+    <nav class="flex-1 px-3 py-2 overflow-y-auto">
+      <div class="text-xs font-medium text-gray-400 uppercase tracking-wider px-2 py-2">日记</div>
+      <a href="#" onclick="resetFilter(); return false;" class="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-[#3A3A3A] hover:bg-gray-50 transition-colors cursor-pointer">
+        <i class="ph ph-house"></i>
+        全部日记
+      </a>
+      <div id="tagFilterList" class="mt-2"></div>
+    </nav>
+
+    <!-- 底部 -->
+    <div class="px-5 py-4 border-t border-gray-100">
+      <div class="text-xs text-gray-400 text-center">手机端局域网地址</div>
+      <div id="serverAddr" class="text-xs text-center mt-1 font-mono text-[#FF9472]"></div>
+    </div>
+  </aside>
+
+  <!-- ========== 主内容区 ========== -->
+  <main class="main-content flex-1 flex flex-col overflow-hidden">
+    <!-- 顶栏 -->
+    <header class="bg-white/70 backdrop-blur-md border-b border-gray-100 px-6 h-14 flex items-center justify-between flex-shrink-0">
+      <div class="flex items-center gap-4">
+        <h2 id="feedTitle" class="text-base font-semibold text-[#3A3A3A]">全部日记</h2>
+        <span id="postCount" class="text-xs text-gray-400"></span>
+      </div>
+      <button id="refreshBtn" class="text-sm text-gray-400 hover:text-[#FF9472] transition-colors cursor-pointer flex items-center gap-1">
+        <i class="ph ph-arrows-clockwise"></i>
+        刷新
+      </button>
+    </header>
+
+    <!-- 日记流 -->
+    <div id="feedContainer" class="flex-1 overflow-y-auto px-6 py-6">
+      <div id="loading" class="flex justify-center items-center py-20">
+        <div class="w-6 h-6 border-2 border-[#FF9472] border-t-transparent rounded-full animate-spin"></div>
+        <span class="ml-3 text-gray-400 text-sm">加载中...</span>
+      </div>
+      <div id="error" class="hidden text-center py-20">
+        <i class="ph ph-wifi-x text-4xl text-gray-300"></i>
+        <p class="text-gray-400 text-sm mt-3">加载失败，请确认手机和电脑在同一局域网</p>
+        <button onclick="fetchPosts()" class="mt-3 text-sm text-[#FF9472] hover:underline cursor-pointer">重试</button>
+      </div>
+      <div id="empty" class="hidden text-center py-20">
+        <i class="ph ph-note-blank text-4xl text-gray-200"></i>
+        <p class="text-gray-400 text-sm mt-3">还没有日记</p>
+        <p class="text-gray-300 text-xs mt-1">点击左侧"写新日记"开始记录</p>
+      </div>
+      <div id="postGrid" class="grid grid-cols-1 md:grid-cols-2 gap-4 pb-24"></div>
+    </div>
+  </main>
+
+  <!-- ========== 编辑抽屉 ========== -->
+  <div id="drawerOverlay" class="drawer-overlay" onclick="closeEditor()"></div>
+  <div id="drawerPanel" class="drawer-panel">
+    <!-- 抽屉顶栏 -->
+    <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100 flex-shrink-0">
+      <div class="flex items-center gap-3">
+        <span id="editorTitle" class="text-sm font-medium text-[#3A3A3A]">写日记</span>
+        <span id="editorUuid" class="hidden text-xs text-gray-400 font-mono"></span>
+      </div>
+      <div class="flex items-center gap-3">
+        <!-- 标签输入 -->
+        <div class="flex items-center gap-2">
+          <i class="ph ph-tag text-gray-400 text-sm"></i>
+          <input id="tagInput" class="text-sm border-none outline-none bg-transparent text-gray-500 placeholder:text-gray-300 w-32" placeholder="标签，回车确认" />
+        </div>
+        <div id="tagList" class="flex flex-wrap gap-1 max-w-48"></div>
+        <button onclick="closeEditor()" class="text-gray-400 hover:text-gray-600 text-xl leading-none cursor-pointer">
+          <i class="ph ph-x"></i>
         </button>
       </div>
     </div>
 
-    <!-- 加载中 -->
-    <div id="loading" class="flex justify-center py-20">
-      <div class="w-6 h-6 border-2 border-[#FF9472] border-t-transparent rounded-full animate-spin"></div>
-      <span class="ml-3 text-gray-400 text-sm">加载日记中...</span>
-    </div>
+    <!-- 编辑器主体 -->
+    <div class="editor-split flex-1 overflow-hidden">
+      <!-- 左：文本编辑区 -->
+      <div class="drop-zone relative" id="dropZone"
+        ondragover="event.preventDefault(); this.classList.add('dragover')"
+        ondragleave="this.classList.remove('dragover')"
+        ondrop="handleDrop(event)">
+        <textarea id="editorTextarea" class="editor-textarea w-full h-full"
+          placeholder="此刻的想法或发生的故事...
 
-    <!-- 错误提示 -->
-    <div id="error" class="hidden text-center py-20">
-      <p class="text-gray-400 text-sm">加载失败，请确认手机和电脑在同一局域网</p>
-      <button onclick="fetchPosts()" class="mt-3 text-sm text-[#FF9472] hover:underline cursor-pointer">重试</button>
-    </div>
-
-    <!-- 空状态 -->
-    <div id="empty" class="hidden text-center py-20">
-      <p class="text-gray-300 text-lg">还没有写过日记</p>
-      <p class="text-gray-300 text-sm mt-1">在手机上写一篇吧～</p>
-    </div>
-
-    <!-- 日记网格 -->
-    <div id="grid" class="hidden grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
-  </main>
-
-  <!-- Toast -->
-  <div id="toast" class="toast"></div>
-
-  <!-- 全文查看弹窗 -->
-  <div id="modalOverlay" class="hidden fixed inset-0 z-50 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4" onclick="closeModal()">
-    <div class="bg-white rounded-2xl max-w-lg w-full max-h-[80vh] flex flex-col shadow-xl" onclick="event.stopPropagation()">
-      <div class="flex items-center justify-between px-5 py-3 border-b border-gray-100">
-        <span class="text-sm text-gray-400">日记全文</span>
-        <button onclick="closeModal()" class="text-gray-300 hover:text-gray-500 text-xl leading-none cursor-pointer">&times;</button>
+支持拖拽图片到此处上传
+快捷键：Ctrl+S 保存"
+          onkeydown="handleEditorKeydown(event)"></textarea>
+        <div id="uploadProgress" class="hidden absolute inset-0 bg-white/80 flex items-center justify-center">
+          <div class="text-sm text-[#FF9472]">正在上传图片...</div>
+        </div>
       </div>
-      <div id="modalBody" class="p-5 text-sm text-[#3A3A3A] leading-relaxed whitespace-pre-wrap overflow-y-auto"></div>
+      <!-- 右：实时预览区 -->
+      <div class="editor-preview">
+        <div id="previewContent" class="preview-content text-sm"></div>
+      </div>
+    </div>
+
+    <!-- 抽屉底栏 -->
+    <div class="flex items-center justify-between px-6 py-4 border-t border-gray-100 flex-shrink-0 bg-white">
+      <div class="text-xs text-gray-400">
+        <kbd class="bg-gray-100 px-1.5 py-0.5 rounded text-xs">Ctrl+S</kbd> 保存
+        &nbsp;·&nbsp;
+        <kbd class="bg-gray-100 px-1.5 py-0.5 rounded text-xs">Ctrl+Enter</kbd> 发布
+      </div>
+      <div class="flex gap-3">
+        <button id="cancelBtn" onclick="closeEditor()" class="px-4 py-2 text-sm text-gray-500 hover:text-gray-700 cursor-pointer">取消</button>
+        <button id="saveBtn" onclick="savePost()" class="bg-[#FF9472] hover:bg-[#FF8058] active:scale-95 text-white text-sm font-medium px-6 py-2 rounded-xl transition-all duration-200 cursor-pointer shadow-sm">
+          发布
+        </button>
+      </div>
     </div>
   </div>
+
+  <!-- ========== 图片查看弹窗 ========== -->
+  <div id="imageModal" class="hidden fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4" onclick="closeImageModal()">
+    <img id="imageModalImg" src="" class="max-w-full max-h-full object-contain rounded-lg" onclick="event.stopPropagation()" />
+  </div>
+
+  <!-- ========== Toast ========== -->
+  <div id="toast" class="toast"></div>
 
   <script>
     const API_BASE = '';
 
+    // ========== 状态管理 ==========
+    let allPosts = [];
+    let currentFilter = null; // null = 全部，string = 标签名
+    let editingPost = null; // null = 新建，object = 编辑
+    let currentTags = []; // 当前编辑的标签列表
+    let uploadQueue = [];
+
     // ========== Toast ==========
     let toastTimer = null;
-
     function showToast(msg) {
       const el = document.getElementById('toast');
       el.textContent = msg;
@@ -121,68 +374,141 @@
       toastTimer = setTimeout(() => el.classList.remove('show'), 2500);
     }
 
-    // ========== 发布 ==========
-    async function publishPost() {
-      const input = document.getElementById('publisherInput');
-      const btn = document.getElementById('publishBtn');
-      const content = input.value.trim();
-      if (!content) return;
-
-      btn.disabled = true;
-      btn.textContent = '发布中...';
-
+    // ========== 心跳检测 ==========
+    async function checkStatus() {
+      const dot = document.getElementById('statusDot');
+      const text = document.getElementById('statusText');
       try {
-        const res = await fetch(`${API_BASE}/api/posts`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content }),
-        });
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        const data = await res.json();
-        if (!data.success) throw new Error(data.error || '发布失败');
-
-        input.value = '';
-        showToast('已同步至手机');
-        fetchPosts();
-      } catch (e) {
-        showToast('发布失败: ' + (e.message || e));
-      } finally {
-        btn.disabled = false;
-        btn.textContent = '发布到手机';
+        const res = await fetch(`${API_BASE}/api/status`);
+        if (res.ok) {
+          const data = await res.json();
+          dot.className = 'status-dot online';
+          text.textContent = '🟢 在线 · ' + data.device;
+        } else {
+          throw new Error();
+        }
+      } catch {
+        dot.className = 'status-dot offline';
+        text.textContent = '🔴 离线';
       }
     }
 
-    // ========== 加载日记列表 ==========
+    // ========== 获取日记列表 ==========
     async function fetchPosts() {
-      const loadingEl = document.getElementById('loading');
-      const errorEl = document.getElementById('error');
-      const emptyEl = document.getElementById('empty');
-      const gridEl = document.getElementById('grid');
+      const loading = document.getElementById('loading');
+      const error = document.getElementById('error');
+      const empty = document.getElementById('empty');
+      const grid = document.getElementById('postGrid');
 
-      loadingEl.classList.remove('hidden');
-      errorEl.classList.add('hidden');
-      emptyEl.classList.add('hidden');
-      gridEl.classList.add('hidden');
+      loading.classList.remove('hidden');
+      error.classList.add('hidden');
+      empty.classList.add('hidden');
+      grid.classList.add('hidden');
 
       try {
         const res = await fetch(`${API_BASE}/api/posts`);
         if (!res.ok) throw new Error('HTTP ' + res.status);
-        const posts = await res.json();
+        allPosts = await res.json();
 
-        loadingEl.classList.add('hidden');
+        loading.classList.add('hidden');
 
-        if (!posts || posts.length === 0) {
-          emptyEl.classList.remove('hidden');
+        // 过滤
+        let posts = allPosts;
+        if (currentFilter) {
+          posts = posts.filter(p => p.tags && p.tags.includes(currentFilter));
+        }
+
+        if (posts.length === 0) {
+          empty.classList.remove('hidden');
           return;
         }
 
-        gridEl.classList.remove('hidden');
-        gridEl.innerHTML = posts.map(post => renderCard(post)).join('');
+        grid.classList.remove('hidden');
+        grid.innerHTML = posts.map(p => renderCard(p)).join('');
+
+        document.getElementById('postCount').textContent = posts.length + ' 篇';
+        updateTagFilter();
       } catch (e) {
-        loadingEl.classList.add('hidden');
-        errorEl.classList.remove('hidden');
-        console.error('Fetch error:', e);
+        loading.classList.add('hidden');
+        error.classList.remove('hidden');
+        console.error(e);
       }
+    }
+
+    // ========== 标签筛选更新 ==========
+    function updateTagFilter() {
+      const container = document.getElementById('tagFilterList');
+      const tagMap = {};
+      for (const p of allPosts) {
+        for (const t of (p.tags || [])) {
+          tagMap[t] = (tagMap[t] || 0) + 1;
+        }
+      }
+      const tags = Object.keys(tagMap).sort((a, b) => tagMap[b] - tagMap[a]);
+
+      if (tags.length === 0) {
+        container.innerHTML = '';
+        return;
+      }
+
+      container.innerHTML = `
+        <div class="text-xs font-medium text-gray-400 uppercase tracking-wider px-2 py-2">标签</div>
+        ${tags.map(tag => `
+          <a href="#" onclick="setTagFilter('${tag}'); return false;"
+             class="flex items-center justify-between px-3 py-2 rounded-lg text-sm transition-colors cursor-pointer ${currentFilter === tag ? 'bg-[#FF9472]/10 text-[#FF9472]' : 'text-[#3A3A3A] hover:bg-gray-50'}">
+            <span class="flex items-center gap-2">
+              <i class="ph ph-tag"></i>
+              ${tag}
+            </span>
+            <span class="text-xs text-gray-400">${tagMap[tag]}</span>
+          </a>
+        `).join('')}
+      `;
+    }
+
+    function setTagFilter(tag) {
+      currentFilter = currentFilter === tag ? null : tag;
+      document.getElementById('feedTitle').textContent = tag || '全部日记';
+      fetchPosts();
+    }
+
+    function resetFilter() {
+      currentFilter = null;
+      document.getElementById('feedTitle').textContent = '全部日记';
+      fetchPosts();
+    }
+
+    // ========== 渲染日记卡片 ==========
+    function renderCard(post) {
+      const preview = post.content
+        ? (post.content.length > 160 ? post.content.substring(0, 160) + '...' : post.content)
+        : '';
+      const images = post.images || [];
+      const tags = post.tags || [];
+
+      return `
+        <div class="post-card bg-white rounded-2xl overflow-hidden border border-gray-100 shadow-sm"
+             onclick="openEditor('${post.uuid}')">
+          ${images.length > 0 ? `
+          <div class="image-grid">
+            ${images.slice(0, 3).map(img => `
+              <img src="${img.url}" alt="image" class="w-full h-20 object-cover rounded-lg cursor-pointer"
+                   onclick="event.stopPropagation(); openImage('${img.url}')"
+                   onerror="this.style.display='none'" />
+            `).join('')}
+            ${images.length > 3 ? `<div class="flex items-center justify-center h-20 bg-gray-50 rounded-lg text-xs text-gray-400">+${images.length - 3}</div>` : ''}
+          </div>` : ''}
+          <div class="p-4">
+            ${tags.length > 0 ? `
+              <div class="flex flex-wrap gap-1 mb-2">
+                ${tags.map(t => `<span class="tag-chip">${t}</span>`).join('')}
+              </div>
+            ` : ''}
+            <p class="text-xs text-gray-400 mb-2">${formatDate(post.updatedAt)}</p>
+            <p class="text-sm text-[#3A3A3A] leading-relaxed line-clamp-4 whitespace-pre-wrap">${escapeHtml(preview)}</p>
+          </div>
+        </div>
+      `;
     }
 
     function formatDate(ms) {
@@ -190,49 +516,9 @@
       const y = d.getFullYear();
       const m = String(d.getMonth() + 1).padStart(2, '0');
       const day = String(d.getDate()).padStart(2, '0');
-      const w = ['日', '一', '二', '三', '四', '五', '六'][d.getDay()];
-      return `${y}年${m}月${day}日 星期${w}`;
-    }
-
-    // ========== 全文查看弹窗 ==========
-    function openModal(content) {
-      document.getElementById('modalBody').textContent = content || '';
-      document.getElementById('modalOverlay').classList.remove('hidden');
-      document.body.style.overflow = 'hidden';
-    }
-
-    function closeModal() {
-      document.getElementById('modalOverlay').classList.add('hidden');
-      document.body.style.overflow = '';
-    }
-
-    function renderCard(post) {
-      const preview = post.content
-        ? post.content.length > 200
-          ? post.content.substring(0, 200) + '...'
-          : post.content
-        : '';
-
-      const hasImages = post.images && post.images.length > 0;
-
-      return `
-        <div class="post-card bg-white rounded-2xl overflow-hidden border border-gray-100 cursor-pointer"
-             onclick="openModal(\`${escapeHtml(post.content || '')}\`)">
-          ${hasImages ? `
-          <div class="flex gap-0.5 overflow-hidden ${post.images.length === 1 ? 'h-48' : 'h-40'}">
-            ${post.images.slice(0, 3).map((img, i) => `
-              <img src="${img.url}" alt="image"
-                   class="${post.images.length === 1 ? 'w-full' : (post.images.length === 2 ? 'w-1/2' : (i === 0 ? 'w-1/2' : 'w-1/4'))} h-full object-cover"
-                   onerror="this.style.display='none'" />
-            `).join('')}
-            ${post.images.length > 3 ? `<div class="w-1/4 h-full bg-gray-100 flex items-center justify-center text-gray-400 text-xs">+${post.images.length - 3}</div>` : ''}
-          </div>` : ''}
-          <div class="p-4">
-            <p class="text-xs text-gray-400 mb-2">${formatDate(post.updatedAt)}</p>
-            <p class="text-sm text-[#3A3A3A] leading-relaxed whitespace-pre-wrap line-clamp-4">${escapeHtml(preview)}</p>
-          </div>
-        </div>
-      `;
+      const hh = String(d.getHours()).padStart(2, '0');
+      const mm = String(d.getMinutes()).padStart(2, '0');
+      return `${y}年${m}月${day}日 ${hh}:${mm}`;
     }
 
     function escapeHtml(str) {
@@ -241,22 +527,220 @@
       return div.innerHTML;
     }
 
-    // ========== 事件绑定 ==========
-    document.getElementById('refreshBtn').addEventListener('click', fetchPosts);
-    document.getElementById('publishBtn').addEventListener('click', publishPost);
+    // ========== 编辑器 ==========
+    function openEditor(uuid) {
+      const textarea = document.getElementById('editorTextarea');
+      const title = document.getElementById('editorTitle');
+      const uuidEl = document.getElementById('editorUuid');
+      const tagList = document.getElementById('tagList');
+      const tagInput = document.getElementById('tagInput');
 
-    // Ctrl+Enter 快捷键发布
-    document.getElementById('publisherInput').addEventListener('keydown', (e) => {
-      if (e.ctrlKey && e.key === 'Enter') {
+      if (uuid) {
+        // 编辑已有日记
+        editingPost = allPosts.find(p => p.uuid === uuid);
+        if (!editingPost) return;
+        textarea.value = editingPost.content || '';
+        currentTags = [...(editingPost.tags || [])];
+        title.textContent = '编辑日记';
+        uuidEl.textContent = uuid;
+        uuidEl.classList.remove('hidden');
+      } else {
+        // 新建
+        editingPost = null;
+        textarea.value = '';
+        currentTags = [];
+        title.textContent = '写日记';
+        uuidEl.classList.add('hidden');
+      }
+
+      // 渲染已有标签
+      renderEditorTags();
+      tagInput.value = '';
+
+      // 打开抽屉
+      document.getElementById('drawerOverlay').classList.add('active');
+      document.getElementById('drawerPanel').classList.add('active');
+
+      updatePreview();
+      textarea.focus();
+    }
+
+    function closeEditor() {
+      document.getElementById('drawerOverlay').classList.remove('active');
+      document.getElementById('drawerPanel').classList.remove('active');
+      editingPost = null;
+      currentTags = [];
+    }
+
+    function renderEditorTags() {
+      const tagList = document.getElementById('tagList');
+      tagList.innerHTML = currentTags.map(tag => `
+        <span class="tag-chip cursor-pointer" onclick="removeTag('${tag}')">
+          ${tag} <i class="ph ph-x text-xs ml-1"></i>
+        </span>
+      `).join('');
+    }
+
+    function removeTag(tag) {
+      currentTags = currentTags.filter(t => t !== tag);
+      renderEditorTags();
+    }
+
+    // 标签输入
+    document.getElementById('tagInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ',') {
         e.preventDefault();
-        publishPost();
+        const val = e.target.value.trim().replace(/,$/, '');
+        if (val && !currentTags.includes(val)) {
+          currentTags.push(val);
+          renderEditorTags();
+        }
+        e.target.value = '';
       }
     });
 
-    // 自动加载
+    // 实时预览
+    document.getElementById('editorTextarea').addEventListener('input', updatePreview);
+
+    function updatePreview() {
+      const content = document.getElementById('editorTextarea').value;
+      const preview = document.getElementById('previewContent');
+      if (content.trim()) {
+        preview.innerHTML = marked.parse(content);
+      } else {
+        preview.innerHTML = '<p class="text-gray-300 text-sm">预览区</p>';
+      }
+    }
+
+    // 快捷键
+    function handleEditorKeydown(e) {
+      if (e.ctrlKey && e.key === 's') {
+        e.preventDefault();
+        savePost();
+      } else if (e.ctrlKey && e.key === 'Enter') {
+        e.preventDefault();
+        savePost();
+      }
+    }
+
+    // ========== 保存 ==========
+    async function savePost() {
+      const textarea = document.getElementById('editorTextarea');
+      const content = textarea.value.trim();
+      if (!content) {
+        showToast('内容不能为空');
+        return;
+      }
+
+      const saveBtn = document.getElementById('saveBtn');
+      saveBtn.disabled = true;
+      saveBtn.textContent = '发布中...';
+
+      try {
+        const body = {
+          content,
+          tags: currentTags,
+        };
+        if (editingPost) {
+          body.uuid = editingPost.uuid;
+        }
+
+        const res = await fetch(`${API_BASE}/api/posts`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || '保存失败');
+
+        showToast(editingPost ? '已更新' : '已发布');
+        closeEditor();
+        fetchPosts();
+      } catch (e) {
+        showToast('发布失败: ' + (e.message || e));
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = '发布';
+      }
+    }
+
+    // ========== 拖放上传 ==========
+    async function handleDrop(e) {
+      e.preventDefault();
+      document.getElementById('dropZone').classList.remove('dragover');
+
+      const files = e.dataTransfer.files;
+      if (files.length === 0) return;
+
+      for (const file of files) {
+        if (!file.type.startsWith('image/')) continue;
+        await uploadImage(file);
+      }
+    }
+
+    async function uploadImage(file) {
+      const progress = document.getElementById('uploadProgress');
+      progress.classList.remove('hidden');
+
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const res = await fetch(`${API_BASE}/api/upload`, {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!res.ok) throw new Error('Upload failed');
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error);
+
+        // 在光标处插入 Markdown 图片
+        const textarea = document.getElementById('editorTextarea');
+        const url = data.url;
+        const alt = file.name.replace(/\.[^.]+$/, '');
+        const insert = `\n![${alt}](${url})\n`;
+
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        const text = textarea.value;
+        textarea.value = text.substring(0, start) + insert + text.substring(end);
+        textarea.selectionStart = textarea.selectionEnd = start + insert.length;
+        textarea.focus();
+
+        updatePreview();
+        showToast('图片上传成功');
+      } catch (e) {
+        showToast('上传失败: ' + (e.message || e));
+      } finally {
+        progress.classList.add('hidden');
+      }
+    }
+
+    // ========== 图片查看 ==========
+    function openImage(url) {
+      document.getElementById('imageModalImg').src = url;
+      document.getElementById('imageModal').classList.remove('hidden');
+    }
+
+    function closeImageModal() {
+      document.getElementById('imageModal').classList.add('hidden');
+    }
+
+    // ========== 事件绑定 ==========
+    document.getElementById('refreshBtn').addEventListener('click', fetchPosts);
+    document.getElementById('newPostBtn').addEventListener('click', () => openEditor());
+
+    // ========== 初始化 ==========
+    checkStatus();
     fetchPosts();
 
-    // 每 30 秒自动刷新
+    // 心跳每 3 秒
+    setInterval(checkStatus, 3000);
+
+    // 每 30 秒刷新列表
     setInterval(fetchPosts, 30000);
   </script>
 </body>

@@ -10,9 +10,12 @@ import 'package:network_info_plus/network_info_plus.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
+import 'package:image_picker/image_picker.dart' show XFile;
 
 import '../services/objectbox_store.dart';
+import '../services/image_processor.dart';
 import '../models/post.dart';
+import '../models/tag.dart';
 import '../models/image_meta.dart';
 
 /// CORS 中间件：为所有响应添加跨域头
@@ -81,6 +84,66 @@ class LocalServerService {
     _setupRoutes();
   }
 
+  /// 从 Content-Type 中提取 boundary
+  static String? _extractBoundary(String contentType) {
+    final match = RegExp(r'boundary=([^\s;]+)').firstMatch(contentType);
+    return match?.group(1);
+  }
+
+  /// 解析 multipart 数据，提取文件列表
+  static List<Map<String, dynamic>> _parseMultipart(List<int> bytes, String boundary) {
+    final files = <Map<String, dynamic>>[];
+    final boundaryBytes = '--$boundary'.codeUnits;
+    final endBoundaryBytes = '--$boundary--'.codeUnits;
+
+    int start = 0;
+    while (start < bytes.length) {
+      int boundaryPos = _indexOfBytes(bytes, boundaryBytes, start);
+      if (boundaryPos == -1) break;
+
+      start = boundaryPos + boundaryBytes.length;
+      if (start < bytes.length && bytes[start] == 13) start++;
+      if (start < bytes.length && bytes[start] == 10) start++;
+
+      if (_indexOfBytes(bytes, endBoundaryBytes, start - 2) == start - 2) break;
+
+      int nextBoundary = _indexOfBytes(bytes, boundaryBytes, start);
+      if (nextBoundary == -1) break;
+
+      final partBytes = bytes.sublist(start, nextBoundary - 2);
+      final partStr = utf8.decode(partBytes, allowMalformed: true);
+      final filenameMatch = RegExp(r'filename="([^"]+)"').firstMatch(partStr);
+      if (filenameMatch != null) {
+        int bodyStart = 0;
+        for (int i = 0; i < partBytes.length - 3; i++) {
+          if (partBytes[i] == 13 && partBytes[i + 1] == 10 &&
+              partBytes[i + 2] == 13 && partBytes[i + 3] == 10) {
+            bodyStart = i + 4;
+            break;
+          }
+        }
+        files.add({
+          'filename': filenameMatch.group(1)!,
+          'data': partBytes.sublist(bodyStart),
+        });
+      }
+      start = nextBoundary + boundaryBytes.length;
+    }
+    return files;
+  }
+
+  /// 在字节数组中查找模式的位置
+  static int _indexOfBytes(List<int> bytes, List<int> pattern, int start) {
+    outer:
+    for (int i = start; i <= bytes.length - pattern.length; i++) {
+      for (int j = 0; j < pattern.length; j++) {
+        if (bytes[i + j] != pattern[j]) continue outer;
+      }
+      return i;
+    }
+    return -1;
+  }
+
   /// API 鉴权中间件
   ///
   /// 除 `/`（Web 主页）和 `/api/ping`（连通性测试）外，
@@ -89,14 +152,19 @@ class LocalServerService {
   Middleware _authMiddleware() {
     return (Handler innerHandler) {
       return (Request request) async {
-        // 放行 Web 主页、ping 和调试端点
+        // 放行 Web 主页、ping、status 和调试端点
         final path = request.requestedUri.path;
-        if (path == '/' || path == '/api/ping' || path.startsWith('/api/debug')) {
+        if (path == '/' ||
+            path == '/api/ping' ||
+            path == '/api/status' ||
+            path.startsWith('/api/debug')) {
           return innerHandler(request);
         }
 
-        // 仅对非图片下载的 /api/* 路径检查鉴权
-        if (path.startsWith('/api/') && !path.startsWith('/api/images/')) {
+        // 仅对非图片下载的 /api/* 路径检查鉴权（/api/upload 需要 auth）
+        if (path.startsWith('/api/') &&
+            !path.startsWith('/api/images/') &&
+            !path.startsWith('/api/assets')) {
           final authHeader = request.headers['authorization'];
           if (authHeader == null || !authHeader.startsWith('Bearer ')) {
             return Response.unauthorized('Missing or invalid Authorization header');
@@ -118,6 +186,14 @@ class LocalServerService {
     // 测试连通性
     _router.get('/api/ping', (Request request) {
       return Response.ok('Server is running');
+    });
+
+    // 心跳检测 - 返回设备状态
+    _router.get('/api/status', (Request request) {
+      return Response.ok(
+        jsonEncode({'status': 'ok', 'device': 'MyNotes'}),
+        headers: {'Content-Type': 'application/json'},
+      );
     });
 
     // 同步端点（Obsidian 插件专用）
@@ -170,9 +246,9 @@ class LocalServerService {
       );
     });
 
-    // 获取所有非删除状态的日记列表
+    // 获取所有非删除状态的日记列表（按时间倒序）
     _router.get('/api/posts', (Request request) {
-      final posts = ObjectBoxStore.instance.getSyncablePosts();
+      final posts = ObjectBoxStore.instance.getSyncablePosts().reversed.toList();
       final list = posts.map((post) {
         return {
           'uuid': post.uuid,
@@ -185,7 +261,8 @@ class LocalServerService {
           'images': post.images.map((img) {
             return {
               'localPath': img.localPath,
-              'remoteUrl': '',
+              'url': '/api/assets?path=${Uri.encodeComponent(img.localPath)}',
+              'downloadUrl': '/api/images/${img.id}/download',
             };
           }).toList(),
         };
@@ -202,18 +279,99 @@ class LocalServerService {
         final body = await request.readAsString();
         final data = jsonDecode(body) as Map<String, dynamic>;
         final content = data['content'] as String? ?? '';
+        final tagsRaw = data['tags'] as List<dynamic>? ?? [];
+        final uuid = data['uuid'] as String?;
 
         final post = Post(
-          uuid: const Uuid().v4(),
+          uuid: uuid ?? const Uuid().v4(),
           content: content,
           updatedAt: DateTime.now(),
           isDeleted: false,
         );
 
+        // 处理标签关联
+        for (final tagName in tagsRaw) {
+          if (tagName is String && tagName.isNotEmpty) {
+            var tag = ObjectBoxStore.instance.getTagByName(tagName);
+            if (tag == null) {
+              tag = Tag(name: tagName);
+              ObjectBoxStore.instance.putTag(tag);
+            }
+            post.tags.add(tag);
+          }
+        }
+
         ObjectBoxStore.instance.putPost(post);
 
         return Response.ok(
-          jsonEncode({'success': true, 'id': post.id}),
+          jsonEncode({'success': true, 'id': post.id, 'uuid': post.uuid}),
+          headers: {'Content-Type': 'application/json'},
+        );
+      } catch (e) {
+        return Response.badRequest(
+          body: jsonEncode({'success': false, 'error': e.toString()}),
+          headers: {'Content-Type': 'application/json'},
+        );
+      }
+    });
+
+    // 上传图片（multipart/form-data）
+    _router.post('/api/upload', (Request request) async {
+      try {
+        // 从请求中解析 multipart 数据
+        final contentType = request.headers['content-type'] ?? '';
+        if (!contentType.contains('multipart/form-data')) {
+          return Response.badRequest(
+            body: jsonEncode({'success': false, 'error': 'Expected multipart/form-data'}),
+            headers: {'Content-Type': 'application/json'},
+          );
+        }
+
+        // 读取原始请求体
+        final bytes = await request.read().expand((x) => x).toList();
+        final boundary = _extractBoundary(contentType);
+        if (boundary == null) {
+          return Response.badRequest(
+            body: jsonEncode({'success': false, 'error': 'No boundary found'}),
+            headers: {'Content-Type': 'application/json'},
+          );
+        }
+
+        // 解析 multipart 数据，提取文件
+        final files = _parseMultipart(bytes, boundary);
+        if (files.isEmpty) {
+          return Response.badRequest(
+            body: jsonEncode({'success': false, 'error': 'No file in request'}),
+            headers: {'Content-Type': 'application/json'},
+          );
+        }
+
+        // 只处理第一个文件
+        final fileData = files.first;
+        final fileName = fileData['filename'] as String? ?? 'upload.jpg';
+        final fileBytes = fileData['data'] as List<int>;
+
+        // 创建临时 XFile 用于 ImageProcessor
+        final tempDir = Directory.systemTemp;
+        final tempPath = '${tempDir.path}/${const Uuid().v4()}_$fileName';
+        final tempFile = File(tempPath);
+        await tempFile.writeAsBytes(fileBytes);
+
+        // 调用 ImageProcessor.process 保存图片
+        final savedPath = await ImageProcessor.process(XFile(tempPath));
+
+        // 清理临时文件
+        if (tempFile.existsSync()) tempFile.deleteSync();
+
+        // 构建可访问的图片 URL（使用 /api/assets 代理）
+        final imageUrl = '/api/assets?path=${Uri.encodeComponent(savedPath)}';
+
+        return Response.ok(
+          jsonEncode({
+            'success': true,
+            'url': imageUrl,
+            'localPath': savedPath,
+          }),
           headers: {'Content-Type': 'application/json'},
         );
       } catch (e) {
