@@ -12,6 +12,8 @@ import '../providers.dart';
 import '../services/export_service.dart';
 import 'export_filter_sheet.dart';
 import 'publish_screen.dart';
+import 'post_preview_screen.dart';
+import 'image_gallery_viewer.dart';
 import 'lan_sync_screen.dart';
 import 'statistics_screen.dart';
 import 'tags_screen.dart';
@@ -222,7 +224,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   /// 打开帖子查看/编辑
   Future<void> _openPost(Post post) async {
     await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => PublishScreen(post: post)),
+      MaterialPageRoute(builder: (_) => PostPreviewScreen(post: post)),
     );
   }
 
@@ -477,7 +479,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             // ——— 图片区域 ———
             if (post.images.isNotEmpty) ...[
               const SizedBox(height: 14),
-              _buildCardImages(post.images.toList()),
+              _buildCardImages(post.images.toList(), post),
             ],
 
             // ——— 标签区域 ———
@@ -564,23 +566,27 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   ///
   /// - 1 张：全宽展示，大圆角
   /// - 多张：三列网格（类九宫格），最多 9 张
-  Widget _buildCardImages(List<ImageMeta> images) {
+  /// 点击图片打开全屏画廊，支持左右滑动
+  Widget _buildCardImages(List<ImageMeta> images, Post post) {
     if (images.length == 1) {
-      return ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: Image.file(
-          File(images[0].localPath),
-          width: double.infinity,
-          height: 200,
-          fit: BoxFit.cover,
-          cacheWidth: 800,
-          errorBuilder: (context, error, stackTrace) {
-            return Container(
-              height: 200,
-              color: Colors.grey.shade200,
-              child: const Icon(Icons.broken_image, color: Colors.grey),
-            );
-          },
+      return GestureDetector(
+        onTap: () => _openImageGallery(post, 0),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: Image.file(
+            File(images[0].localPath),
+            width: double.infinity,
+            height: 200,
+            fit: BoxFit.cover,
+            cacheWidth: 800,
+            errorBuilder: (context, error, stackTrace) {
+              return Container(
+                height: 200,
+                color: Colors.grey.shade200,
+                child: const Icon(Icons.broken_image, color: Colors.grey),
+              );
+            },
+          ),
         ),
       );
     }
@@ -595,25 +601,40 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ),
       itemCount: min(images.length, 9),
       itemBuilder: (context, index) {
-        return ClipRRect(
-          borderRadius: BorderRadius.circular(8),
-          child: Image.file(
-            File(images[index].localPath),
-            fit: BoxFit.cover,
-            cacheWidth: 300,
-            errorBuilder: (context, error, stackTrace) {
-              return Container(
-                color: Colors.grey.shade200,
-                child: const Icon(
-                  Icons.broken_image,
-                  color: Colors.grey,
-                  size: 20,
-                ),
-              );
-            },
+        return GestureDetector(
+          onTap: () => _openImageGallery(post, index),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Image.file(
+              File(images[index].localPath),
+              fit: BoxFit.cover,
+              cacheWidth: 300,
+              errorBuilder: (context, error, stackTrace) {
+                return Container(
+                  color: Colors.grey.shade200,
+                  child: const Icon(
+                    Icons.broken_image,
+                    color: Colors.grey,
+                    size: 20,
+                  ),
+                );
+              },
+            ),
           ),
         );
       },
+    );
+  }
+
+  void _openImageGallery(Post post, int initialIndex) {
+    final paths = post.images.map((img) => img.localPath).toList();
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ImageGalleryViewer(
+          imagePaths: paths,
+          initialIndex: initialIndex,
+        ),
+      ),
     );
   }
 

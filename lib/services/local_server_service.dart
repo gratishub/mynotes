@@ -177,9 +177,8 @@ class LocalServerService {
   static String _extractClientIp(Request request) {
     try {
       final info = request.context['shelf.io.connection_info'];
-      if (info != null) {
-        // ignore: avoid_dynamic_calls
-        return (info as dynamic).remoteAddress?.toString() ?? 'unknown';
+      if (info is HttpConnectionInfo) {
+        return info.remoteAddress.address;
       }
     } catch (_) {}
     return 'unknown';
@@ -330,9 +329,28 @@ class LocalServerService {
       );
     });
 
-    // 获取所有非删除状态的日记列表（按时间倒序）
+    // 获取日记列表（支持日期和标签筛选）
     _router.get('/api/posts', (Request request) {
-      final posts = ObjectBoxStore.instance.getSyncablePosts().reversed.toList();
+      final params = request.url.queryParameters;
+      DateTime? startDate;
+      DateTime? endDate;
+      List<String>? selectedTags;
+
+      if (params['startDate'] != null) {
+        startDate = DateTime.tryParse(params['startDate']!);
+      }
+      if (params['endDate'] != null) {
+        endDate = DateTime.tryParse(params['endDate']!);
+      }
+      if (params['tag'] != null && params['tag']!.isNotEmpty) {
+        selectedTags = [params['tag']!];
+      }
+
+      final posts = ObjectBoxStore.instance.getFilteredPosts(
+        startDate: startDate,
+        endDate: endDate,
+        selectedTags: selectedTags,
+      ).reversed.toList();
       final list = posts.map((post) {
         return {
           'uuid': post.uuid,

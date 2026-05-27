@@ -115,6 +115,40 @@
       font-weight: 500;
     }
 
+    /* 日期筛选 */
+    .date-filter-btn {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .date-filter-btn.active {
+      background: rgba(255, 148, 114, 0.15);
+      color: #FF9472;
+    }
+    .date-filter-btn:not(.active) {
+      color: #9CA3AF;
+    }
+    .date-filter-btn:hover {
+      background: rgba(255, 148, 114, 0.1);
+    }
+    input[type="date"] {
+      border: 1px solid #E5E7EB;
+      border-radius: 8px;
+      padding: 4px 8px;
+      font-size: 12px;
+      color: #3A3A3A;
+      outline: none;
+      font-family: 'Noto Sans SC', sans-serif;
+    }
+    input[type="date"]:focus {
+      border-color: #FF9472;
+    }
+
     /* 抽屉动画 */
     .drawer-overlay {
       position: fixed;
@@ -306,6 +340,25 @@
         全部日记
       </a>
       <div id="tagFilterList" class="mt-2"></div>
+
+      <!-- 日期筛选 -->
+      <div class="mt-4 px-2">
+        <div class="text-xs font-medium text-gray-400 uppercase tracking-wider py-2">日期筛选</div>
+        <div class="flex flex-col gap-2 mt-1">
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-gray-400 w-8">从</span>
+            <input type="date" id="dateStart" class="flex-1" onchange="onDateFilterChange()" />
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-xs text-gray-400 w-8">至</span>
+            <input type="date" id="dateEnd" class="flex-1" onchange="onDateFilterChange()" />
+          </div>
+          <button id="clearDateBtn" onclick="clearDateFilter()"
+                  class="hidden text-xs text-[#FF9472] hover:underline cursor-pointer text-left">
+            清除日期筛选
+          </button>
+        </div>
+      </div>
     </nav>
 
     <!-- 底部 -->
@@ -436,6 +489,8 @@
     let allPosts = [];
     let allTags = []; // 服务器上的所有标签
     let currentFilter = null; // null = 全部，string = 标签名
+    let dateStart = ''; // 日期筛选起始
+    let dateEnd = ''; // 日期筛选结束
     let editingPost = null; // null = 新建，object = 编辑
     let currentTags = []; // 当前编辑的标签列表
     let uploadQueue = [];
@@ -483,17 +538,21 @@
       grid.classList.add('hidden');
 
       try {
-        const res = await apiFetch(`${API_BASE}/api/posts`);
+        // 构建查询参数
+        const params = new URLSearchParams();
+        if (currentFilter) params.set('tag', currentFilter);
+        if (dateStart) params.set('startDate', dateStart);
+        if (dateEnd) params.set('endDate', dateEnd);
+        const qs = params.toString();
+        const url = `${API_BASE}/api/posts${qs ? '?' + qs : ''}`;
+
+        const res = await apiFetch(url);
         if (!res.ok) throw new Error('HTTP ' + res.status);
         allPosts = await res.json();
 
         loading.classList.add('hidden');
 
-        // 过滤
         let posts = allPosts;
-        if (currentFilter) {
-          posts = posts.filter(p => p.tags && p.tags.includes(currentFilter));
-        }
 
         if (posts.length === 0) {
           empty.classList.remove('hidden');
@@ -552,6 +611,38 @@
     function resetFilter() {
       currentFilter = null;
       document.getElementById('feedTitle').textContent = '全部日记';
+      fetchPosts();
+    }
+
+    // ========== 日期筛选 ==========
+    function onDateFilterChange() {
+      dateStart = document.getElementById('dateStart').value;
+      dateEnd = document.getElementById('dateEnd').value;
+      const clearBtn = document.getElementById('clearDateBtn');
+      if (dateStart || dateEnd) {
+        clearBtn.classList.remove('hidden');
+        const label = dateStart && dateEnd
+          ? `${dateStart} ~ ${dateEnd}`
+          : dateStart ? `${dateStart} 起` : `至 ${dateEnd}`;
+        document.getElementById('feedTitle').textContent = label;
+      } else {
+        clearBtn.classList.add('hidden');
+        if (!currentFilter) {
+          document.getElementById('feedTitle').textContent = '全部日记';
+        }
+      }
+      fetchPosts();
+    }
+
+    function clearDateFilter() {
+      dateStart = '';
+      dateEnd = '';
+      document.getElementById('dateStart').value = '';
+      document.getElementById('dateEnd').value = '';
+      document.getElementById('clearDateBtn').classList.add('hidden');
+      if (!currentFilter) {
+        document.getElementById('feedTitle').textContent = '全部日记';
+      }
       fetchPosts();
     }
 
