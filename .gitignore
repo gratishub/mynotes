@@ -46,6 +46,7 @@ app.*.map.json
 
 # Claude Code local config
 .claude/
+CLAUDE.md
 
 # Internal personal documentation (not shared)
 /internal/
