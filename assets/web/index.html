@@ -138,7 +138,7 @@
     .date-input {
       border: 1px solid #E5E7EB;
       border-radius: 6px;
-      padding: 4px 6px;
+      padding: 5px 6px;
       font-size: 11px;
       color: #3A3A3A;
       outline: none;
@@ -147,6 +147,10 @@
     }
     .date-input:focus {
       border-color: #FF9472;
+    }
+    .date-input::-webkit-calendar-picker-indicator {
+      opacity: 0.4;
+      cursor: pointer;
     }
 
     /* 抽屉动画 */
@@ -353,9 +357,15 @@
         </div>
         <!-- 自定义范围 -->
         <div class="mt-3 flex items-center gap-1.5">
-          <input type="date" id="dateStart" class="date-input flex-1" onchange="onDateFilterChange()" />
+          <div class="relative flex-1">
+            <input type="date" id="dateStart" class="date-input w-full" onchange="onDateFilterChange()" onfocus="this.parentElement.querySelector('.ph-overlay').style.display='none'" onblur="if(!this.value)this.parentElement.querySelector('.ph-overlay').style.display=''" />
+            <span class="ph-overlay absolute left-2 top-1/2 -translate-y-1/2 text-[11px] text-gray-400 pointer-events-none">开始日期</span>
+          </div>
           <span class="text-gray-300 text-xs">~</span>
-          <input type="date" id="dateEnd" class="date-input flex-1" onchange="onDateFilterChange()" />
+          <div class="relative flex-1">
+            <input type="date" id="dateEnd" class="date-input w-full" onchange="onDateFilterChange()" onfocus="this.parentElement.querySelector('.ph-overlay').style.display='none'" onblur="if(!this.value)this.parentElement.querySelector('.ph-overlay').style.display=''" />
+            <span class="ph-overlay absolute left-2 top-1/2 -translate-y-1/2 text-[11px] text-gray-400 pointer-events-none">结束日期</span>
+          </div>
         </div>
         <!-- 当前筛选状态 -->
         <div id="dateFilterStatus" class="hidden mt-2 flex items-center justify-between">
@@ -482,12 +492,17 @@
     const API_BASE = '';
     let API_TOKEN = localStorage.getItem('mynotes_token') || '';
 
-    // 通用 fetch 封装，自动携带鉴权头
+    // 会话标识（用于客户端追踪）
+    const SESSION_ID = localStorage.getItem('mynotes_session') ||
+      (() => { const id = 'web-' + Math.random().toString(36).slice(2, 10); localStorage.setItem('mynotes_session', id); return id; })();
+    const CLIENT_IP = 'browser'; // 浏览器端无法直接获取本地 IP
+
+    // 通用 fetch 封装，自动携带鉴权头和会话标识
     function apiFetch(url, options = {}) {
       const headers = options.headers || {};
-      if (API_TOKEN) {
-        headers['Authorization'] = 'Bearer ' + API_TOKEN;
-      }
+      if (API_TOKEN) headers['Authorization'] = 'Bearer ' + API_TOKEN;
+      headers['X-Session-Id'] = SESSION_ID;
+      headers['X-Client-Ip'] = CLIENT_IP;
       return fetch(url, { ...options, headers });
     }
 
@@ -656,6 +671,7 @@
       activeQuickDate = type;
       document.getElementById('dateStart').value = dateStart;
       document.getElementById('dateEnd').value = dateEnd;
+      document.querySelectorAll('.ph-overlay').forEach(el => el.style.display = 'none');
       updateQuickDateBtns();
       updateDateFilterLabel();
       fetchPosts();
@@ -683,6 +699,8 @@
       activeQuickDate = null;
       document.getElementById('dateStart').value = '';
       document.getElementById('dateEnd').value = '';
+      // 恢复 placeholder
+      document.querySelectorAll('.ph-overlay').forEach(el => el.style.display = '');
       document.getElementById('dateFilterStatus').classList.add('hidden');
       updateQuickDateBtns();
       if (!currentFilter) {

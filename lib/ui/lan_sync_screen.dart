@@ -415,7 +415,6 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen>
           if (_clients.isNotEmpty) ...[
             const SizedBox(height: 12),
             ..._clients.map((c) {
-              final ip = c['ip'] ?? '未知';
               final ua = _parseUserAgent(c['userAgent'] ?? '');
               return Padding(
                 padding: const EdgeInsets.only(bottom: 8),
@@ -435,21 +434,20 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            ip,
+                            ua,
                             style: TextStyle(
                               fontSize: 13,
                               color: Colors.white.withAlpha(200),
-                              fontFamily: 'monospace',
                             ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
                           Text(
-                            ua,
+                            '活跃中',
                             style: TextStyle(
                               fontSize: 11,
                               color: Colors.white.withAlpha(100),
                             ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
                           ),
                         ],
                       ),
@@ -468,7 +466,7 @@ class _LanSyncScreenState extends ConsumerState<LanSyncScreen>
   String _parseUserAgent(String ua) {
     if (ua.isEmpty || ua == 'Unknown') return '未知客户端';
     // 提取浏览器
-    String browser = 'Unknown';
+    String browser = '浏览器';
     if (ua.contains('Edg/')) {
       browser = 'Edge';
     } else if (ua.contains('Chrome/') && !ua.contains('Chromium')) {
